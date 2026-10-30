@@ -219,10 +219,11 @@ export function Select({ value, options, onChange, placeholder = "Choose...", ti
         <Icon name="chevron-down" size={18} color={C.ink} />
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable onPress={() => setOpen(false)} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end" }}>
+        <View style={{ flex: 1, justifyContent: "flex-end" }}>
+          <Pressable onPress={() => setOpen(false)} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.35)" }} />
           <View style={{ backgroundColor: C.card, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, paddingBottom: 28, maxHeight: "70%" }}>
             {title ? <Text style={{ fontFamily: F.head, fontSize: 26, color: C.ink, marginBottom: 8 }}>{title}</Text> : null}
-            <ScrollView>
+            <ScrollView keyboardShouldPersistTaps="handled">
               {options.length === 0 ? <Text style={{ color: C.sub, paddingVertical: 12 }}>Nothing to choose from.</Text> : null}
               {options.map((o) => (
                 <Pressable key={o.key} onPress={() => { onChange(o.key); setOpen(false); }} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.line }}>
@@ -235,7 +236,7 @@ export function Select({ value, options, onChange, placeholder = "Choose...", ti
               ))}
             </ScrollView>
           </View>
-        </Pressable>
+        </View>
       </Modal>
     </>
   );

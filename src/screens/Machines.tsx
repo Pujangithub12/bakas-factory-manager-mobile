@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Check, Chips, YesNo, confirm, say, useAction, Empty, C, F, Spacer, ScreenHeader, Pill, Tile, StatusDot, initialsOf } from "../ui";
+import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Check, Chips, YesNo, confirm, say, useAction, Empty, C, F, Spacer, ScreenHeader, Pill, Tile, StatusDot, initialsOf, Icon } from "../ui";
 import { useAuth } from "../auth";
 import { newId, save, useData, type Data } from "../store";
 import {
-  batchCode, batchMaterial, batchTickets, blockingJob, busyPeople, canRun, dieCounter, fieldsFor, isManagement, lastReading, machineAlerts,
-  machineStatus, num, onSiteMap, personName, READING_DUE_MIN, yardUsedPct,
+  bagCounts, batchCode, batchMaterial, batchTickets, blockingJob, briquetteKg, busyPeople, canRun, dieCounter, fieldsFor, isManagement, lastReading, machineAlerts,
+  machineStatus, num, onSiteMap, openJobs, pelletKg, personName, READING_DUE_MIN, yardUsedPct,
 } from "../rules";
 import { fmtDateTime, fmtDuration, fmtTime, nowIso, shiftWindow, MIN, type Row as R } from "../time";
 
@@ -112,24 +112,83 @@ export function MachineBody({ machineId }: { machineId: string }) {
     <Tile icon="clipboard-outline" title="Log sheet" sub="Today's readings" onPress={() => nav.navigate("LogSheet")} />
   );
 
+  const nowMs = Date.now();
+  const nowD = new Date(nowMs);
+  const sw = shiftWindow(D.shift);
+  const shiftFrom = sw?.start ?? new Date(nowMs - 8 * 3_600_000);
+  const openDown = D.downtime.find((d) => d.machine_id === m.id && !d.ended_at);
+  const planned = st.state === "down" && D.stop_reason.find((r) => r.id === openDown?.stop_reason_id)?.type === "Planned";
+  const heroColor = planned ? C.amber : color;
+  const helperNames = st.run ? D.run_helper.filter((h) => h.run_id === st.run!.id).map((h) => personName(D, h.person_id)) : [];
+  const reportedJob = openJobs(D, m.id).find((j) => !j.machine_stopped && j.kind !== "bypass");
+  const statusLine = st.run
+    ? `Running since ${fmtTime(st.run.started_at)} · ${mine ? "you" : st.operator?.full_name}${helperNames.length ? ` + ${helperNames.join(", ")}` : ""}`
+    : st.state === "down"
+      ? `${st.reason ?? "Down"}${openDown ? ` since ${fmtTime(openDown.started_at)}` : ""}${blocking ? ` · ${blocking.started_at ? `${personName(D, blocking.fitter_id)} is on it` : "waiting for a fitter"}` : ""}`
+      : detail;
+
+  // The hourly reading: due an hour after the last one (or the start), late at the alert limit.
+  const lastRd = lastReading(D, m.id);
+  const readingFields = fieldsFor(D, m.stage, "reading");
+  const hasReadings = readingFields.length > 0 || m.stage === "briquette";
+  const hasSheet = hasReadings || fieldsFor(D, m.stage, "prestart").length > 0;
+  const dueBase = st.run ? Math.max(lastRd ? new Date(lastRd.at).getTime() : 0, new Date(st.run.started_at).getTime()) : 0;
+  const dueAt = dueBase + 60 * MIN;
+  const readingLate = !!st.run && nowMs > dueBase + READING_DUE_MIN * MIN;
+  const showDue = !!st.run && mine && hasReadings;
+
+  // Output this shift, from weights only.
+  let prod: React.ReactNode = null;
+  if (m.stage === "pellet") {
+    const bags = bagCounts(D, shiftFrom, nowD).reduce((n, b) => n + num(b.bags), 0);
+    prod = <ProdStat label="Pellets this shift" value={`${bags.toLocaleString("en-US")} bags · ${(pelletKg(D, shiftFrom, nowD) / 1000).toFixed(2)} t`} />;
+  } else if (m.stage === "briquette") {
+    const lastW = D.log_reading.filter((r) => r.machine_id === m.id && num(r.one_min_kg) > 0).sort((a, b) => String(a.at).localeCompare(String(b.at))).pop();
+    prod = (
+      <ProdStat
+        label="Briquettes this shift"
+        value={`${(briquetteKg(D, shiftFrom, nowD, m.id) / 1000).toFixed(2)} t`}
+        sub={lastW ? `${(num(lastW.one_min_kg) * 0.06).toFixed(2)} t/hr from the ${fmtTime(lastW.at)} weighing` : "No 1-minute weighing yet"}
+      />
+    );
+  }
+
+  const tiles: React.ReactNode[] = [];
+  if (feedStage || m.stage === "pellet") tiles.push(firstTile);
+  if (hasSheet) tiles.push(<Tile icon="clipboard-outline" title="Log sheet" sub="This shift so far" onPress={() => nav.navigate("LogSheet")} />);
+  tiles.push(<Tile icon="construct-outline" title="Report a problem" sub="Goes to maintenance" onPress={() => nav.navigate("ReportProblem", { machineId: m.id })} />);
+  const tileRows: React.ReactNode[][] = [];
+  for (let k = 0; k < tiles.length; k += 2) tileRows.push(tiles.slice(k, k + 2));
+
+  const helperRunIds = new Set(D.run_helper.filter((h) => h.person_id === me).map((h) => h.run_id as string));
+  const myRuns = D.machine_run
+    .filter((r) => (r.operator_id === me || helperRunIds.has(r.id)) && new Date(r.stopped_at ?? nowMs).getTime() > shiftFrom.getTime())
+    .sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)));
+
   return (
     <View style={{ gap: 14 }}>
-      <View style={{ backgroundColor: C.card, borderRadius: 18, borderWidth: 1, borderColor: C.line, borderTopWidth: 5, borderTopColor: color, padding: 18, gap: 8 }}>
+      <View style={{ backgroundColor: C.card, borderRadius: 18, borderWidth: 1, borderColor: C.line, borderTopWidth: 5, borderTopColor: heroColor, padding: 18, gap: 8 }}>
         <Row>
           <View style={{ backgroundColor: C.greySoft, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
             <Text style={{ fontSize: 13, color: C.sub, fontWeight: "600" }}>{m.tag}</Text>
           </View>
           <Spacer />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.greySoft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 }}>
-            <StatusDot color={color} size={9} />
-            <Text style={{ fontSize: 14, color: C.ink, fontWeight: "600" }}>{STATE_WORD[st.state]}</Text>
+            <StatusDot color={heroColor} size={9} />
+            <Text style={{ fontSize: 14, color: C.ink, fontWeight: "600" }}>{st.bypass ? "On bypass" : planned ? "Stopped" : STATE_WORD[st.state]}</Text>
           </View>
         </Row>
         <Text style={{ fontFamily: F.head, fontSize: 36, color: C.ink, lineHeight: 40 }}>{m.name}</Text>
-        <Text style={{ fontFamily: F.head, fontSize: 72, lineHeight: 76, color: st.state === "idle" ? "#4a4f4b" : color }}>{STATE_WORD[st.state]}</Text>
-        <Text style={{ color: C.sub, fontSize: 15 }}>{detail}</Text>
+        {st.run ? (
+          <LiveClock since={st.run.started_at} color={heroColor} />
+        ) : (
+          <Text style={{ fontFamily: F.head, fontSize: 72, lineHeight: 76, color: st.state === "idle" ? "#4a4f4b" : heroColor }}>{st.state === "down" && !planned ? "Down" : "Stopped"}</Text>
+        )}
+        <Text style={{ color: C.sub, fontSize: 15 }}>{statusLine}</Text>
+        {st.bypass ? <NoteLine tone="bad" icon="warning-outline" text="Running on bypass. A job is open for maintenance." /> : null}
+        {reportedJob ? <NoteLine tone="warn" icon="construct-outline" text={`${reportedJob.problem} reported ${fmtTime(reportedJob.reported_at)}${reportedJob.fitter_id ? ` · ${personName(D, reportedJob.fitter_id)} on it` : ""}`} /> : null}
         <Row style={{ flexWrap: "wrap" }}>
-          {machineAlerts(D, m).map((a) => <Badge key={a.key} text={a.text} tone={a.tone === "bad" ? "bad" : "warn"} />)}
+          {machineAlerts(D, m).filter((a) => !(st.bypass && /bypass/i.test(a.text))).map((a) => <Badge key={a.key} text={a.text} tone={a.tone === "bad" ? "bad" : "warn"} />)}
         </Row>
 
         {!st.run ? (
@@ -147,10 +206,25 @@ export function MachineBody({ machineId }: { machineId: string }) {
       {panel === "start" && !st.run ? <StartForm D={D} m={m} me={me} /> : null}
       {panel === "stop" && st.run && mine ? <StopForm D={D} m={m} me={me} run={st.run} onDone={() => setPanel(null)} /> : null}
 
-      <Row style={{ alignItems: "stretch", gap: 12 }}>
-        {firstTile}
-        <Tile icon="construct-outline" title="Report a problem" sub="Goes to maintenance" onPress={() => nav.navigate("ReportProblem", { machineId: m.id })} />
-      </Row>
+      {showDue ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: readingLate ? C.amberSoft : C.card, borderRadius: 16, borderWidth: 1, borderColor: readingLate ? C.amber : C.line, padding: 14 }}>
+          <Icon name="time-outline" size={26} color={readingLate ? C.amber : C.green} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.ink }}>{readingLate ? "Hourly reading is late" : "Next hourly reading"}</Text>
+            <Text style={{ color: C.sub, fontSize: 13 }}>
+              {readingLate ? `It was due at ${fmtTime(new Date(dueAt))}` : `Due at ${fmtTime(new Date(dueAt))}`}
+              {m.stage === "briquette" ? " · weigh 1 minute of output" : ""}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+      {prod}
+      {tileRows.map((row, k) => (
+        <Row key={k} style={{ alignItems: "stretch", gap: 12 }}>
+          {row.map((t, j) => <View key={j} style={{ flex: 1, flexDirection: "row" }}>{t}</View>)}
+          {row.length === 1 ? <View style={{ flex: 1 }} /> : null}
+        </Row>
+      ))}
 
       {m.stage === "briquette" ? <DieCard D={D} m={m} /> : null}
       {st.run && mine ? (
@@ -160,11 +234,61 @@ export function MachineBody({ machineId }: { machineId: string }) {
         </>
       ) : null}
       {feedStage && allowed && batches.length > 1 ? <YardsPanel D={D} m={m} me={me} /> : null}
+      <Card>
+        <T bold style={{ fontSize: 17 }}>Your runs this shift</T>
+        {myRuns.length === 0 ? <Sub>Nothing yet this shift.</Sub> : null}
+        {myRuns.map((r) => (
+          <Row key={r.id} style={{ justifyContent: "space-between" }}>
+            <View style={{ backgroundColor: C.greySoft, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+              <Text style={{ fontSize: 13, color: C.sub, fontWeight: "600" }}>{D.machine.find((x) => x.id === r.machine_id)?.tag ?? "?"}</Text>
+            </View>
+            <T>{fmtTime(r.started_at)}-{r.stopped_at ? fmtTime(r.stopped_at) : "now"}</T>
+            <Sub>{r.stopped_at ? D.stop_reason.find((x) => x.id === r.stop_reason_id)?.name ?? "" : r.operator_id === me ? "running" : "helping"}</Sub>
+          </Row>
+        ))}
+      </Card>
       {busy ? <Sub>Saving...</Sub> : null}
     </View>
   );
 }
 
+
+const clock2 = (n: number) => String(n).padStart(2, "0");
+/** 02:14:09 */
+const fmtClock = (ms: number) => {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  return `${clock2(Math.floor(t / 3600))}:${clock2(Math.floor((t % 3600) / 60))}:${clock2(t % 60)}`;
+};
+
+/** The running time, ticking every second. It re-renders on its own so the rest of the screen stays still. */
+function LiveClock({ since, color }: { since: string; color: string }) {
+  const [t, setT] = useState(Date.now());
+  useEffect(() => {
+    const i = setInterval(() => setT(Date.now()), 1000);
+    return () => clearInterval(i);
+  }, []);
+  return <Text style={{ fontFamily: F.head, fontSize: 64, lineHeight: 68, color }}>{fmtClock(t - new Date(since).getTime())}</Text>;
+}
+
+function NoteLine({ tone, icon, text }: { tone: "bad" | "warn"; icon: React.ComponentProps<typeof Icon>["name"]; text: string }) {
+  const col = tone === "bad" ? C.red : C.amber;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+      <Icon name={icon} size={18} color={col} />
+      <Text style={{ flex: 1, color: col, fontSize: 14 }}>{text}</Text>
+    </View>
+  );
+}
+
+function ProdStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <Card>
+      <Sub>{label}</Sub>
+      <Text style={{ fontFamily: F.head, fontSize: 34, color: C.ink, lineHeight: 38 }}>{value}</Text>
+      {sub ? <Sub>{sub}</Sub> : null}
+    </Card>
+  );
+}
 
 function DieCard({ D, m }: { D: Data; m: R }) {
   const d = dieCounter(D, m);
