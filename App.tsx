@@ -25,6 +25,8 @@ import Floor from "./src/screens/Floor";
 import Dashboard, { Detail } from "./src/screens/Dashboard";
 import LogSheet from "./src/screens/LogSheet";
 import Details from "./src/screens/Details";
+import OperatorProblems from "./src/screens/OperatorProblems";
+import MachineDetails from "./src/screens/MachineDetails";
 import Overview from "./src/screens/Overview";
 import People from "./src/screens/People";
 
@@ -48,7 +50,7 @@ function Tabs() {
   // An operator who also has other roles (Security, Weighbridge, Store, Fitter, Supervisor) gets their screens on a More tab.
   // A security guard (and nothing else) gets Gate, Today and Me, like the design.
   const securityOnly = roles.includes("Security") && !isAdmin && !isOperator && !roles.includes("Supervisor");
-  // A supervisor (not also an operator or admin) gets Crew, Floor, More and Me. The badges show what needs doing.
+  // A supervisor (not also an operator or admin) gets Crew, Floor and Me. The badges show what needs doing.
   const supervisorOnly = roles.includes("Supervisor") && !isAdmin && !isOperator && !securityOnly;
   const shift = shiftWindow(D.shift);
   const notOnDuty = new Set(D.attendance.filter((a) => shift && new Date(a.shift_start).getTime() === shift.start.getTime() && !a.on_duty_at && !a.gate_out).map((a) => a.person_id)).size;
@@ -85,15 +87,14 @@ function Tabs() {
         <>
           <Tab.Screen name="CrewHome" component={Crew} options={{ title: "Crew", tabBarBadge: crewBadge || undefined }} />
           <Tab.Screen name="FloorHome" component={Floor} options={{ title: "Floor", tabBarBadge: floorBadge || undefined }} />
-          <Tab.Screen name="More" component={Home} />
         </>
       ) : (
         <>
           <Tab.Screen name="Work" component={isOperator ? MyMachines : Home} options={{ title: isOperator ? "Machine" : "Work" }} />
           {isOperator ? <Tab.Screen name="LogSheet" component={LogSheet} options={{ title: "Log sheet" }} /> : null}
           {moreScreens ? <Tab.Screen name="More" component={Home} /> : null}
-          <Tab.Screen name="Problems" component={Jobs} />
-          {moreScreens ? null : <Tab.Screen name="Details" component={Details} />}
+          <Tab.Screen name="Problems" component={isOperator ? OperatorProblems : Jobs} />
+          {moreScreens ? null : <Tab.Screen name="Details" component={isOperator ? MachineDetails : Details} />}
         </>
       )}
       <Tab.Screen name="Me" component={Me} />

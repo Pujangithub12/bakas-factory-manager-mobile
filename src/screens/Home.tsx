@@ -5,9 +5,9 @@ import { Screen, Sub, Card, T, Text, Badge, Row, Btn, C, F, SectionTitle, say, c
 import { useAuth } from "../auth";
 import { clearRejected, pendingOps, rejectedList, useData, useOutboxCounts, type Rejected } from "../store";
 import { syncNow, useSyncState } from "../sync";
-import { fmtDateTime } from "../time";
+import { fmtDateTime, fmtTime, shiftWindow } from "../time";
 import { getServerUrl } from "../api";
-import { hasRole, machineAlerts, onSiteMap } from "../rules";
+import { canRun, hasRole, machineAlerts, onSiteMap, personName } from "../rules";
 import { roleInfo } from "../roles";
 
 type Tile = { title: string; sub: string; screen: string; icon: IconName; roles: string[] | "all"; badge?: () => { text: string; tone: "bad" | "warn" | "info" } | null };
@@ -83,6 +83,24 @@ export function Me() {
   const counts = useOutboxCounts();
   const signOutSafely = useSafeSignOut();
   const name = session!.person.full_name;
+  const D = useData();
+  const me = session!.person.id;
+  const mobile = D.person.find((p) => p.id === me)?.mobile as string | undefined;
+
+  // This shift: gate in and out, on duty, and who is in charge.
+  const w = shiftWindow(D.shift);
+  const att = w
+    ? D.attendance.filter((a) => a.person_id === me && new Date(a.shift_start).getTime() === w.start.getTime()).sort((a, b) => String(b.gate_in).localeCompare(String(a.gate_in)))[0]
+    : undefined;
+  const onSite = onSiteMap(D).has(me);
+  const inCharge = w ? D.shift_in_charge.find((s) => new Date(s.shift_start).getTime() === w.start.getTime()) : undefined;
+  const myMachines = roles.includes("Operator") ? D.machine.filter((m) => canRun(D, me, m, roles)).sort((a, b) => a.tag.localeCompare(b.tag)) : [];
+  const Kv = ({ label, value }: { label: string; value: string }) => (
+    <View style={{ flexBasis: "47%", flexGrow: 1, gap: 2 }}>
+      <Sub>{label}</Sub>
+      <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: C.ink }}>{value}</Text>
+    </View>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -91,10 +109,34 @@ export function Me() {
         <Card style={{ alignItems: "center", gap: 8, paddingVertical: 24 }}>
           <Avatar text={initialsOf(name)} size={84} />
           <Text style={{ fontFamily: F.head, fontSize: 32, color: C.ink }}>{name}</Text>
+          {mobile ? <Sub>{mobile}</Sub> : null}
           <Row style={{ flexWrap: "wrap", justifyContent: "center" }}>
             {roles.map((r) => <Badge key={r} text={roleInfo(r).label} tone="info" />)}
           </Row>
         </Card>
+        <Card>
+          <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink }}>This shift</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 4 }}>
+            <Kv label="Gate in (security)" value={att ? fmtTime(att.gate_in) : "-"} />
+            <Kv label="Gate out" value={att?.gate_out ? fmtTime(att.gate_out) : onSite ? "On site" : "-"} />
+            <Kv label="On duty (supervisor)" value={att?.on_duty_at ? fmtTime(att.on_duty_at) : "-"} />
+            <Kv label="In-charge" value={inCharge ? personName(D, inCharge.person_id) : "Not set"} />
+          </View>
+        </Card>
+        {roles.includes("Operator") ? (
+          <Card>
+            <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink }}>Machines you can run</Text>
+            <Row style={{ flexWrap: "wrap" }}>
+              {myMachines.map((m) => (
+                <View key={m.id} style={{ backgroundColor: C.greySoft, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 }}>
+                  <Text style={{ fontSize: 14, color: C.ink, fontWeight: "600" }}>{m.tag}</Text>
+                </View>
+              ))}
+              {myMachines.length === 0 ? <Sub>None yet</Sub> : null}
+            </Row>
+            <Sub>The supervisor sets this.</Sub>
+          </Card>
+        ) : null}
         <Btn title={sync.syncing ? "Syncing..." : "Sync now"} kind="soft" onPress={() => syncNow().then(() => undefined)} busy={sync.syncing} />
         <Card onPress={() => nav.navigate("SyncStatus")} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <Icon name="alert-circle-outline" />
