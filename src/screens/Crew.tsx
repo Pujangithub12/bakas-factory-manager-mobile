@@ -42,6 +42,10 @@ export default function Crew() {
     .filter((p) => p.active && rolesOf(D, p.id).includes("Operator"))
     .sort((a, b) => a.full_name.localeCompare(b.full_name));
 
+  const drivers = D.person
+    .filter((p) => p.active && rolesOf(D, p.id).includes("Driver"))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+
   const candidates: Option[] = D.person
     .filter((p) => p.active && rolesOf(D, p.id).some((r) => IN_CHARGE_ROLES.includes(r)))
     .sort((a, b) => a.full_name.localeCompare(b.full_name))
@@ -409,6 +413,25 @@ export default function Crew() {
             </Pressable>
           );
         })}
+
+        <SectionTitle>Who may drive which vehicle</SectionTitle>
+        {drivers.length === 0 ? <Sub>No drivers yet.</Sub> : null}
+        {drivers.map((p) => {
+          const ticked = D.driver_vehicle.filter((o) => o.person_id === p.id).length;
+          return (
+            <Pressable
+              key={p.id}
+              onPress={() => nav.navigate("CrewVehicles", { personId: p.id })}
+              style={({ pressed }) => [{ ...card, flexDirection: "row", alignItems: "center", gap: 12, padding: 14 }, pressed && { opacity: 0.7 }]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 17, fontWeight: "700", color: C.ink }}>{p.full_name}</Text>
+                <Text style={{ color: C.sub, fontSize: 14 }}>{ticked} vehicle{ticked === 1 ? "" : "s"} ticked</Text>
+              </View>
+              <Text style={{ color: C.green, fontWeight: "700" }}>Edit</Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -549,6 +572,48 @@ export function CrewMachines() {
                   ? say("Always allowed", "Every operator can run the briquette machine and both chippers.")
                   : toggle(m.id, ticked)
               }
+            />
+          </Card>
+        );
+      })}
+
+      {busy ? <Sub>Saving...</Sub> : null}
+    </Screen>
+  );
+}
+
+/** Tick which vehicles a driver may drive: the JCB and the two tractors. */
+export function CrewVehicles() {
+  const { params } = useRoute<any>();
+  const D = useData();
+  const { busy, run } = useAction();
+  const person = D.person.find((p) => p.id === params.personId);
+
+  const toggle = (vehicleId: string, on: boolean) =>
+    run(() =>
+      save({
+        table: "driver_vehicle",
+        row: { person_id: params.personId, vehicle_id: vehicleId },
+        op: on ? "delete" : "upsert"
+      })
+    );
+
+  return (
+    <Screen>
+      <H>{person?.full_name}</H>
+      <Sub>Vehicles this driver may drive.</Sub>
+
+      {D.vehicle.length === 0 ? <Empty text="No vehicles have reached this phone yet. Check the connection, and that the backend seed has been run." /> : null}
+
+      {[...D.vehicle].sort((a, b) => String(a.name).localeCompare(String(b.name))).map((v) => {
+        const ticked = D.driver_vehicle.some((o) => o.person_id === params.personId && o.vehicle_id === v.id);
+
+        return (
+          <Card key={v.id}>
+            <Check
+              label={`${v.name}${v.reg_no ? ` · ${v.reg_no}` : ""}`}
+              value={ticked}
+              onChange={() => toggle(v.id, ticked)}
             />
           </Card>
         );
