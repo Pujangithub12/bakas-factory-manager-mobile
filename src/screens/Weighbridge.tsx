@@ -1,66 +1,122 @@
 import React, { useEffect, useState } from "react";
-import { View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Chips, confirm, say, useAction, Empty, C, Spacer } from "../ui";
+import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Chips, confirm, say, useAction, Empty, C, F, Spacer, Icon, ScreenHeader, initialsOf, type IconName } from "../ui";
 import { useAuth } from "../auth";
 import { newId, save, useData, type Data } from "../store";
 import { useSyncState } from "../sync";
 import { activeBatch, batchCode, batchMaterial, batchTickets, fillingBatch, nextChallan, num, suggestYard, ticketNet } from "../rules";
-import { fmtDateTime, fmtTime, nowIso, shiftWindow, DAY, type Row as R } from "../time";
+import { fmtDateTime, fmtTime, nowIso, productionDayStart, shiftWindow, type Row as R } from "../time";
 
 const kg = (n: number | null) => (n == null ? "-" : `${n.toLocaleString("en-US")} kg`);
 
-export default function Weighbridge() {
-  const nav = useNavigation<any>();
-  const D = useData();
-  const { busy, run } = useAction();
+const kindBadge = (t: R) => <Badge text={t.direction === "in" ? "In" : "Sale"} tone={t.direction === "in" ? "info" : "warn"} />;
 
-  const onBridge = D.weigh_ticket.filter((t) => t.second_kg == null).sort((a, b) => b.first_at.localeCompare(a.first_at));
-  const done = D.weigh_ticket
-    .filter((t) => t.second_kg != null && Date.now() - new Date(t.second_at).getTime() < DAY)
-    .sort((a, b) => b.second_at.localeCompare(a.second_at));
+function useWeighData() {
+  const D = useData();
   const party = (t: R) => (t.direction === "in" ? D.supplier : D.buyer).find((p) => p.id === (t.direction === "in" ? t.supplier_id : t.buyer_id))?.name ?? "-";
   const mat = (t: R) => D.material.find((m) => m.id === t.material_id)?.name ?? "-";
+  const onBridge = D.weigh_ticket.filter((t) => t.second_kg == null).sort((a, b) => b.first_at.localeCompare(a.first_at));
+  const dayStart = productionDayStart().getTime();
+  const done = D.weigh_ticket
+    .filter((t) => t.second_kg != null && new Date(t.second_at).getTime() >= dayStart)
+    .sort((a, b) => b.second_at.localeCompare(a.second_at));
+  return { D, party, mat, onBridge, done };
+}
+
+function Stat({ value, label }: { value: number; label: string }) {
+  return (
+    <Card style={{ flex: 1, gap: 2, padding: 12, borderRadius: 14 }}>
+      <Text style={{ fontFamily: F.head, fontSize: 34, color: C.ink, lineHeight: 38 }}>{value}</Text>
+      <Sub>{label}</Sub>
+    </Card>
+  );
+}
+
+/** Big brown action button with a truck, as in the design. */
+function BigAction({ title, icon, onPress }: { title: string; icon: IconName; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: C.green, borderRadius: 18, paddingVertical: 20 }, pressed && { opacity: 0.8 }]}>
+      <Icon name={icon} size={26} color="#fff" />
+      <Text style={{ fontFamily: F.head, fontSize: 26, color: "#fff" }}>{title}</Text>
+    </Pressable>
+  );
+}
+
+/** Trucks that have had their first weight and wait for the second. */
+function TrucksBody() {
+  const nav = useNavigation<any>();
+  const { D, party, mat, onBridge, done } = useWeighData();
+  const filling = D.yard.filter((y) => fillingBatch(D, y.id)).length;
 
   return (
-    <Screen>
-      <H>Weighbridge</H>
-      <Row style={{ flexWrap: "wrap" }}>
-        <Btn title="Truck in" onPress={() => nav.navigate("TruckIn")} />
-        <Btn title="Truck out (sale)" kind="soft" onPress={() => nav.navigate("TruckOut")} />
-        <Btn title="Bag count" kind="ghost" onPress={() => nav.navigate("BagCount")} />
+    <>
+      <Row style={{ gap: 12 }}>
+        <BigAction title="Truck in" icon="bus-outline" onPress={() => nav.navigate("TruckIn")} />
+        <BigAction title="Sale out" icon="bus-outline" onPress={() => nav.navigate("TruckOut")} />
       </Row>
+      <Row style={{ gap: 12 }}>
+        <Stat value={onBridge.length} label="On the site" />
+        <Stat value={done.length} label="Done today" />
+        <Stat value={filling} label="Yards filling" />
+      </Row>
+      <Btn title="Count pellet bags" kind="soft" onPress={() => nav.navigate("BagCount")} />
 
-      <SectionTitle>On the weighbridge ({onBridge.length})</SectionTitle>
+      <SectionTitle>{`Weighed once · ${onBridge.length}`}</SectionTitle>
       {onBridge.length === 0 ? <Empty text="No truck is waiting for its second weight." /> : null}
-      {onBridge.map((t) => (
-        <Card key={t.id} onPress={() => nav.navigate("WeighOut", { ticketId: t.id })}>
-          <Row>
-            <T bold style={{ fontSize: 17 }}>{t.vehicle_no}</T>
-            <Badge text={t.direction === "in" ? "In" : "Sale"} tone={t.direction === "in" ? "info" : "warn"} />
-            <Spacer />
-            <Sub>#{t.wbsn}</Sub>
-          </Row>
-          <Sub>{mat(t)} · {party(t)}</Sub>
-          <Sub>{t.direction === "in" ? "Gross" : "Empty"} {kg(num(t.first_kg))} at {fmtTime(t.first_at)}</Sub>
-          <Text style={{ color: C.green, fontWeight: "700" }}>Tap to weigh out</Text>
+      {onBridge.map((t) => {
+        const batch = t.direction === "in" ? D.yard_batch.find((b) => b.id === t.batch_id) : null;
+        return (
+          <Card key={t.id} style={{ gap: 6, padding: 16, borderRadius: 18 }}>
+            <Row>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: C.ink }}>{t.vehicle_no}</Text>
+              <Spacer />
+              {kindBadge(t)}
+            </Row>
+            <Sub style={{ fontSize: 14 }}>{party(t)} · {mat(t)}</Sub>
+            <T>
+              First weight {num(t.first_kg).toLocaleString("en-US")} kg at {fmtTime(t.first_at)}
+              {t.direction === "in" ? (batch ? ` · unloading at ${batchCode(D, batch)}` : "") : ` · ${t.challan_no}`}
+            </T>
+            <Sub>Serial #{t.wbsn} · {t.direction === "in" ? "gross" : "empty truck"}</Sub>
+            <Btn title="Weigh out" onPress={() => nav.navigate("WeighOut", { ticketId: t.id })} />
+          </Card>
+        );
+      })}
+
+      <SectionTitle>Done today</SectionTitle>
+      {done.length === 0 ? <Sub>No finished trucks yet.</Sub> : null}
+      {done.map((t) => (
+        <Card key={t.id}>
+          <Row><T bold>{t.vehicle_no}</T>{kindBadge(t)}<Spacer /><T bold>{kg(ticketNet(t))}</T></Row>
+          <Sub>{mat(t)} · {party(t)} · #{t.wbsn}{t.challan_no ? ` · ${t.challan_no}` : ""}</Sub>
+          <Sub>{fmtDateTime(t.second_at)}</Sub>
         </Card>
       ))}
+    </>
+  );
+}
 
-      <SectionTitle>Yards</SectionTitle>
+/** Each yard: its batch, trucks against the limit, and Stop filling. */
+function YardsBody() {
+  const D = useData();
+  const { busy, run } = useAction();
+  return (
+    <>
       {[...D.yard].sort((a, b) => a.letter.localeCompare(b.letter)).map((y) => {
         const b = activeBatch(D, y.id);
         const trucks = b ? batchTickets(D, b.id).length : 0;
         return (
-          <Card key={y.id}>
+          <Card key={y.id} style={{ padding: 16, borderRadius: 18 }}>
             <Row>
-              <T bold style={{ fontSize: 17 }}>{y.name}</T>
+              <Text style={{ fontFamily: F.head, fontSize: 26, color: C.ink }}>{y.name}</Text>
               <Spacer />
               {!b ? <Badge text="Empty" /> : b.started_at ? <Badge text="Feeding" tone="info" /> : b.closed_at ? <Badge text="Closed" tone="warn" /> : <Badge text="Filling" tone="good" />}
             </Row>
             {b ? (
               <>
-                <Sub>{batchCode(D, b)} · {batchMaterial(D, b)?.name ?? "no truck yet"} · {trucks}/{y.holds_trucks ?? "-"} trucks</Sub>
+                <T>{batchCode(D, b)} · {batchMaterial(D, b)?.name ?? "no truck yet"}</T>
+                <Sub>{trucks} of {y.holds_trucks ?? "-"} trucks</Sub>
                 {!b.closed_at ? (
                   <Btn small kind="ghost" title="Stop filling" busy={busy} onPress={() => confirm("Stop filling", `Close ${batchCode(D, b)} for filling?`, "Close", () => run(() => save({ table: "yard_batch", row: { id: b.id, closed_at: nowIso() } })))} />
                 ) : null}
@@ -71,16 +127,37 @@ export default function Weighbridge() {
           </Card>
         );
       })}
+    </>
+  );
+}
 
-      <SectionTitle>Last 24 hours</SectionTitle>
-      {done.length === 0 ? <Sub>No finished trucks.</Sub> : null}
-      {done.map((t) => (
-        <Card key={t.id}>
-          <Row><T bold>{t.vehicle_no}</T><Badge text={t.direction === "in" ? "In" : "Sale"} tone={t.direction === "in" ? "info" : "warn"} /><Spacer /><T bold>{kg(ticketNet(t))}</T></Row>
-          <Sub>{mat(t)} · {party(t)} · #{t.wbsn}{t.challan_no ? ` · ${t.challan_no}` : ""}</Sub>
-          <Sub>{fmtDateTime(t.second_at)}</Sub>
-        </Card>
-      ))}
+/** A tab screen: the title, "name · shift" and the avatar, then the scrolling body. */
+function TabScreen({ title, children }: { title: string; children: React.ReactNode }) {
+  const nav = useNavigation<any>();
+  const { session } = useAuth();
+  const D = useData();
+  const name = session!.person.full_name;
+  const shift = shiftWindow(D.shift)?.shift.name;
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <ScreenHeader title={title} subtitle={`${name}${shift ? ` · ${shift} shift` : ""}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 12 }} keyboardShouldPersistTaps="handled">{children}</ScrollView>
+    </View>
+  );
+}
+
+/** The Weighbridge person's first tab. */
+export const Trucks = () => <TabScreen title="Weighbridge"><TrucksBody /></TabScreen>;
+/** The Weighbridge person's second tab. */
+export const YardsTab = () => <TabScreen title="Yards"><YardsBody /></TabScreen>;
+
+/** The same screens for the Owner and Manager, opened from the home list. */
+export default function Weighbridge() {
+  return (
+    <Screen>
+      <TrucksBody />
+      <SectionTitle>Yards</SectionTitle>
+      <YardsBody />
     </Screen>
   );
 }
