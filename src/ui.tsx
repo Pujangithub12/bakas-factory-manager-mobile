@@ -80,9 +80,9 @@ export const IconTile = ({ name, size = 44 }: { name: IconName; size?: number })
 );
 
 /** A square-ish action tile: icon, title, one line of help. */
-export function Tile({ icon, title, sub, onPress }: { icon: IconName; title: string; sub?: string; onPress?: () => void }) {
+export function Tile({ icon, title, sub, onPress, disabled }: { icon: IconName; title: string; sub?: string; onPress?: () => void; disabled?: boolean }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [s.card, { flex: 1, gap: 8, padding: 14 }, pressed && { opacity: 0.7 }]}>
+    <Pressable onPress={onPress} disabled={disabled} style={({ pressed }) => [s.card, { flex: 1, gap: 8, padding: 14 }, disabled && { opacity: 0.45 }, pressed && { opacity: 0.7 }]}>
       <IconTile name={icon} />
       <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.ink }}>{title}</Text>
       {sub ? <Text style={{ color: C.sub, fontSize: 13 }}>{sub}</Text> : null}

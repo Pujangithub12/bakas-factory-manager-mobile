@@ -1,13 +1,12 @@
 import React, { useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { Badge, C, Card, Empty, F, Pill, Row, ScreenHeader, SectionTitle, Spacer, Sub, T, Text, initialsOf } from "../ui";
+import { Badge, Btn, C, Card, Empty, F, Row, ScreenHeader, SectionTitle, Spacer, Sub, T, Text, initialsOf } from "../ui";
 import { useAuth } from "../auth";
 import { useData } from "../store";
-import { briquetteKg, canRun, fieldsFor, machineStatus, num, pelletKg, personName } from "../rules";
+import { briquetteKg, fieldsFor, num, onSiteMap, pelletKg, personName } from "../rules";
+import { GateBanner, GreasingEditor, MachineSwitch, ReadingEditor, useMyMachines } from "./Machines";
 import { fmtDuration, fmtTime, HOUR, productionDayStart, shiftWindow } from "../time";
-
-const DOT = { running: C.ok, down: C.red, idle: C.grey } as const;
 
 const ms = (v: any) => new Date(v).getTime();
 const overlap = (a: number, b: number, c: number, d: number) => Math.max(0, Math.min(b, d) - Math.max(a, c));
@@ -34,13 +33,12 @@ function Total({ label, value }: { label: string; value: string }) {
 /** The paper log sheet for this shift, one machine at a time: header, totals, hourly readings, start checks, greasing and breakdowns. Management corrects entries on the laptop. */
 export default function LogSheet() {
   const nav = useNavigation<any>();
-  const { session, roles } = useAuth();
+  const { session } = useAuth();
   const D = useData();
   const me = session!.person.id;
   const name = session!.person.full_name;
-  const [sel, setSel] = useState<string | null>(null);
-  const machines = D.machine.filter((m) => canRun(D, me, m, roles)).sort((a, b) => a.tag.localeCompare(b.tag));
-  const m = machines.find((x) => x.id === sel) ?? machines[0];
+  const { machines, current: m } = useMyMachines();
+  const [editing, setEditing] = useState<string | "new" | null>(null);
 
   const nowMs = Date.now();
   const w = shiftWindow(D.shift);
@@ -79,18 +77,21 @@ export default function LogSheet() {
     .filter((d) => d.machine_id === m.id && overlap(ms(d.started_at), d.ended_at ? ms(d.ended_at) : nowMs, fromMs, toMs) > 0)
     .sort((a, b) => String(a.started_at).localeCompare(String(b.started_at)));
 
+  // Add or correct readings: checked in, with a run this shift, and the machine not held by another operator.
+  const openRun = m ? runs.find((r) => !r.stopped_at) : undefined;
+  const canEdit = !!m && onSiteMap(D).has(me) && runs.length > 0 && (!openRun || openRun.operator_id === me);
+  const runForReading = openRun?.operator_id === me ? openRun : [...runs].reverse().find((r) => r.operator_id === me);
   const dateLabel = from.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   const endLabel = !lastRun ? "-" : !lastRun.stopped_at ? "Running" : ms(lastRun.stopped_at) <= toMs ? fmtTime(lastRun.stopped_at) : fmtTime(to);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title="Log sheet" subtitle={`${name}${w ? ` · ${w.shift.name} shift` : ""}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
+      <ScreenHeader title="Log sheet" subtitle={`${name} · ${w ? `${w.shift.name} shift` : "Off-shift"}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}>
-        {machines.length === 0 ? <Empty text="No machine is ticked for you yet." /> : (
+        {machines.length === 0 ? <Empty text="You are not set up on any machine yet. The supervisor ticks your machines." /> : (
           <>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
-              {machines.map((x) => <Pill key={x.id} label={x.tag} dot={DOT[machineStatus(D, x).state]} selected={x.id === m?.id} onPress={() => setSel(x.id)} />)}
-            </ScrollView>
+            <MachineSwitch />
+            <GateBanner />
 
             {!hasSheet ? (
               <Empty text={`The ${m!.name.toLowerCase()} has no log sheet. Start, stop and problems are all that is recorded for it.`} />
@@ -109,13 +110,17 @@ export default function LogSheet() {
 
                 <Card>
                   <Row style={{ gap: 12 }}>
-                    <Total label="Run hours" value={fmtDuration(runMs)} />
+                    <Total label="Run hours" value={`${runHours.toFixed(1)} h`} />
                     <Total label="Total prod." value={tons(prodKg)} />
                     <Total label="Avg prod." value={runHours > 0 ? `${(prodKg / 1000 / runHours).toFixed(2)} t/h` : "-"} />
                   </Row>
                 </Card>
 
-                <SectionTitle>{`Hourly readings · ${readings.length}`}</SectionTitle>
+                <Row>
+                  <View style={{ flex: 1 }}><SectionTitle>{`Hourly readings · ${readings.length}`}</SectionTitle></View>
+                  {canEdit && readingFields.length + (m!.stage === "briquette" ? 1 : 0) > 0 ? <Btn small title="Add reading" onPress={() => setEditing(editing === "new" ? null : "new")} /> : null}
+                </Row>
+                {editing === "new" && runForReading ? <ReadingEditor D={D} m={m!} me={me} runId={runForReading.id} onDone={() => setEditing(null)} /> : null}
                 {readings.length === 0 ? <Empty text="No readings this shift yet." /> : readings.map((r) => {
                   const cells = readingFields
                     .filter((f) => r.vals?.[f.field_key] !== "" && r.vals?.[f.field_key] != null)
@@ -124,9 +129,11 @@ export default function LogSheet() {
                     if (!readingFields.some((f) => f.field_key === "oneMin")) cells.push({ label: "1-minute weight", value: `${num(r.one_min_kg)} kg` });
                     cells.push({ label: "= tons per hour", value: (num(r.one_min_kg) * 0.06).toFixed(2) });
                   }
+                  const own = r.by === me && canEdit;
+                  if (editing === r.id) return <ReadingEditor key={r.id} D={D} m={m!} me={me} runId={r.run_id} reading={r} onDone={() => setEditing(null)} />;
                   return (
-                    <Card key={r.id}>
-                      <Row><T bold>{fmtTime(r.at)}</T><Spacer /><Sub>{personName(D, r.by)}</Sub></Row>
+                    <Card key={r.id} onPress={own ? () => setEditing(r.id) : undefined}>
+                      <Row><T bold>{fmtTime(r.at)}</T><Spacer /><Sub>{personName(D, r.by)}{own ? " · tap to correct" : ""}</Sub></Row>
                       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 4 }}>
                         {cells.map((c, i) => (
                           <View key={i} style={{ flexBasis: "30%", flexGrow: 1 }}>
@@ -161,18 +168,19 @@ export default function LogSheet() {
                 {greasingFields.length ? (
                   <>
                     <SectionTitle>Greasing this shift</SectionTitle>
-                    <Card>
-                      {greased ? greasingFields.map((f) => {
-                        const v = greased.vals?.[f.field_key];
-                        return (
-                          <Row key={f.id} style={{ justifyContent: "space-between" }}>
-                            <T>{f.label}</T>
-                            <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.ink }}>{v === "" || v == null ? "-" : `${v}${f.unit ? ` ${f.unit}` : ""}`}</Text>
-                          </Row>
-                        );
-                      }) : <Sub>Not done yet this shift.</Sub>}
-                      {greased ? <Sub>Saved {fmtTime(greased.at)} by {personName(D, greased.by)}</Sub> : null}
-                    </Card>
+                    {canEdit || onSiteMap(D).has(me) ? <GreasingEditor key={`${m!.id}-${greased?.at ?? ""}`} D={D} m={m!} me={me} /> : (
+                      <Card>
+                        {greased ? greasingFields.map((f) => {
+                          const v = greased.vals?.[f.field_key];
+                          return (
+                            <Row key={f.id} style={{ justifyContent: "space-between" }}>
+                              <T>{f.label}</T>
+                              <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.ink }}>{v === "" || v == null ? "-" : `${v}${f.unit ? ` ${f.unit}` : ""}`}</Text>
+                            </Row>
+                          );
+                        }) : <Sub>Not done yet this shift.</Sub>}
+                      </Card>
+                    )}
                   </>
                 ) : null}
 

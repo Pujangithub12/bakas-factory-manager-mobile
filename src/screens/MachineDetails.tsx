@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { ScrollView, View } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { Badge, Btn, C, Card, Chips, Empty, F, Field, Pill, Row, ScreenHeader, SectionTitle, Spacer, Sub, T, Text, initialsOf, say, useAction } from "../ui";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import { Badge, Btn, C, Card, Chips, Empty, F, Field, Row, ScreenHeader, Screen, H, Select, SectionTitle, Sub, T, Text, initialsOf, say, useAction } from "../ui";
 import { useAuth } from "../auth";
 import { newId, save, useData } from "../store";
-import { briquetteKg, canRun, dieCounter, machineStatus, num, pelletKg, personName, stageRunMs } from "../rules";
-import { DAY, fmtDayTime, fmtTime, HOUR, nowIso, productionDayStart } from "../time";
+import { briquetteKg, dieCounter, isDaily, meterNow, num, pelletKg, personName, pmDueText, pmEvery, pmState, stageRunMs } from "../rules";
+import { DAY, fmtDayTime, fmtTime, HOUR, nowIso, productionDayStart, shiftWindow } from "../time";
+import { MachineSwitch, useMyMachines } from "./Machines";
 
-const DOT = { running: C.ok, down: C.red, idle: C.grey } as const;
 const ms = (v: any) => new Date(v).getTime();
 const overlap = (a: number, b: number, c: number, d: number) => Math.max(0, Math.min(b, d) - Math.max(a, c));
 
@@ -30,28 +30,21 @@ function Kv({ label, value, sub }: { label: string; value: string; sub?: string 
 /** Everything about one machine for the operator: what it is, what it really makes, what is open with maintenance. */
 export default function MachineDetails() {
   const nav = useNavigation<any>();
-  const { session, roles } = useAuth();
+  const { session } = useAuth();
   const D = useData();
   const me = session!.person.id;
   const name = session!.person.full_name;
-  const [sel, setSel] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
-
-  const machines = D.machine.filter((m) => canRun(D, me, m, roles)).sort((a, b) => a.tag.localeCompare(b.tag));
-  const mineRunning = D.machine_run.find((r) => !r.stopped_at && r.operator_id === me)?.machine_id;
-  const m = machines.find((x) => x.id === sel) ?? machines.find((x) => x.id === mineRunning) ?? machines[0];
+  const { current: m } = useMyMachines();
+  const w = shiftWindow(D.shift);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title="Details" subtitle="Machine details" initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
+      <ScreenHeader title="Machine details" subtitle={`${name} · ${w ? `${w.shift.name} shift` : "Off-shift"}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }} keyboardShouldPersistTaps="handled">
         {!m ? <Empty text="You are not set up on any machine yet." /> : (
           <>
-            {machines.length > 1 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
-                {machines.map((x) => <Pill key={x.id} label={x.tag} dot={DOT[machineStatus(D, x).state]} selected={x.id === m.id} onPress={() => { setSel(x.id); setAsking(false); }} />)}
-              </ScrollView>
-            ) : null}
+            <MachineSwitch />
             <Body D={D} m={m} me={me} asking={asking} setAsking={setAsking} />
           </>
         )}
@@ -85,12 +78,25 @@ function Body({ D, m, me, asking, setAsking }: { D: ReturnType<typeof useData>; 
     output = `${t.toFixed(0)} t briquettes in the last 7 days from the hourly 1-minute weighing · ${h7 > 0 ? `${(t / h7).toFixed(2)} t per running hour` : "-"}${last ? ` · last weighing ${(num(last.one_min_kg) * 0.06).toFixed(2)} t/hr at ${fmtTime(last.at)}` : ""}`;
   }
 
-  const die = m.stage === "briquette" ? dieCounter(D, m) : null;
+  const die = num(m.wear_limit_t) > 0 ? dieCounter(D, m) : null;
   const open = D.maintenance_job.filter((j) => j.machine_id === m.id && !j.fixed_at).sort((a, b) => String(b.reported_at).localeCompare(String(a.reported_at)));
   const fixed = D.maintenance_job
     .filter((j) => j.machine_id === m.id && j.fixed_at && ms(j.fixed_at) >= nowMs - 30 * DAY)
     .sort((a, b) => String(b.fixed_at).localeCompare(String(a.fixed_at)))
     .slice(0, 8);
+
+  // The plan: daily checks done today, then the other tasks, overdue first.
+  const tasks = D.pm_task.filter((t) => t.machine_id === m.id);
+  const daily = tasks.filter(isDaily);
+  const dailyDone = daily.filter((t) => D.pm_done.some((d) => d.task_id === t.id && ms(d.done_at) >= t0)).length;
+  const plan = tasks.filter((t) => !isDaily(t)).map((t) => ({ t, s: pmState(D, t) })).sort((a, b) => b.s.f - a.s.f);
+  const recent = [
+    ...D.pm_done.filter((d) => d.machine_id === m.id && ms(d.done_at) >= nowMs - 30 * DAY).map((d) => {
+      const t = D.pm_task.find((x) => x.id === d.task_id);
+      return { key: d.id as string, at: d.done_at as string, text: t ? `${t.component}: ${t.task}` : String(d.note || "Maintenance"), by: d.by as string, sub: d.minutes ? `${d.minutes} min` : t && d.note && d.note !== "OK" ? String(d.note) : "" };
+    }),
+    ...fixed.map((j) => ({ key: j.id as string, at: j.fixed_at as string, text: `Fixed: ${j.problem}`, by: j.fitter_id as string, sub: String(j.work_done ?? "") })),
+  ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
 
   return (
     <>
@@ -112,18 +118,15 @@ function Body({ D, m, me, asking, setAsking }: { D: ReturnType<typeof useData>; 
 
       {die ? (
         <Card>
-          <Row>
-            <T bold>{m.wear_part || "Wear parts"}</T>
-            <Spacer />
-            <Badge text={`${die.tons.toFixed(0)} of ${die.limit} t`} tone={die.tons >= die.limit ? "bad" : die.tons >= die.limit * 0.85 ? "warn" : "good"} />
-          </Row>
+          <T bold>{m.wear_part || "Wear parts"}</T>
           <View style={{ height: 8, borderRadius: 4, backgroundColor: C.line, overflow: "hidden" }}>
-            <View style={{ width: `${Math.min(100, (die.tons / die.limit) * 100)}%`, height: 8, backgroundColor: die.tons >= die.limit ? C.red : die.tons >= die.limit * 0.85 ? C.amber : C.ok }} />
+            <View style={{ width: `${Math.min(100, (die.tons / die.limit) * 100)}%`, height: 8, backgroundColor: die.tons >= die.limit * 0.9 ? C.amber : C.ok }} />
           </View>
-          <Sub>Tons made since the last wear-parts change.</Sub>
+          <Sub>{m.wear_part || "Wear parts"}: {Math.round(die.tons)} t made of about {die.limit} t since the change on {die.since.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}.{die.tons >= die.limit * 0.9 ? " Plan a change." : ""}</Sub>
         </Card>
       ) : null}
 
+      <Btn title="Record maintenance done" onPress={() => nav.navigate("MaintLog", { machineId: m.id })} />
       <Btn title="Report a problem" onPress={() => nav.navigate("ReportProblem", { machineId: m.id })} />
       <Btn title={asking ? "Close the request" : "Request maintenance"} kind="soft" onPress={() => setAsking(!asking)} />
       {asking ? <RequestForm D={D} m={m} me={me} onDone={() => setAsking(false)} /> : null}
@@ -139,15 +142,29 @@ function Body({ D, m, me, asking, setAsking }: { D: ReturnType<typeof useData>; 
         </Card>
       ))}
 
-      <SectionTitle>Last 30 days of maintenance</SectionTitle>
+      <SectionTitle>Maintenance schedule</SectionTitle>
+      {daily.length ? <Sub>Daily checks: {dailyDone} of {daily.length} done today.</Sub> : null}
       <Card>
-        {fixed.length === 0 ? <Sub>Nothing fixed in the last 30 days.</Sub> : fixed.map((j) => (
-          <View key={j.id} style={{ gap: 2 }}>
+        {plan.length === 0 ? <Sub>No plan for this machine yet.</Sub> : plan.map(({ t, s: st }) => (
+          <View key={t.id} style={{ gap: 2 }}>
             <Row>
-              <T bold style={{ flex: 1 }}>Fixed: {j.problem}</T>
-              <Sub>{fmtDayTime(j.fixed_at)}</Sub>
+              <T bold style={{ flex: 1 }}>{t.component}: {t.task}</T>
+              <Badge text={st.st === "over" ? "Overdue" : st.st === "soon" ? "Due soon" : st.st === "new" ? "No record" : "OK"} tone={st.st === "over" ? "bad" : st.st === "soon" ? "warn" : "mute"} />
             </Row>
-            <Sub>{j.fitter_id ? personName(D, j.fitter_id) : ""}{j.work_done ? `${j.fitter_id ? " · " : ""}${j.work_done}` : ""}</Sub>
+            <Sub>{t.equipment} · {pmEvery(t)} · {pmDueText(t, st)}</Sub>
+          </View>
+        ))}
+      </Card>
+
+      <SectionTitle>Maintenance in the last 30 days</SectionTitle>
+      <Card>
+        {recent.length === 0 ? <Sub>Nothing recorded.</Sub> : recent.map((x) => (
+          <View key={x.key} style={{ gap: 2 }}>
+            <Row>
+              <T bold style={{ flex: 1 }}>{x.text}</T>
+              <Sub>{fmtDayTime(x.at)}</Sub>
+            </Row>
+            <Sub>{x.by ? personName(D, x.by) : ""}{x.sub ? `${x.by ? " · " : ""}${x.sub}` : ""}</Sub>
           </View>
         ))}
       </Card>
@@ -164,8 +181,8 @@ function RequestForm({ D, m, me, onDone }: { D: ReturnType<typeof useData>; m: a
 
   const send = () =>
     run(async () => {
-      if (!part.trim()) throw new Error("Write which part");
-      if (needed.trim().length < 4) throw new Error("Write what is needed");
+      if (!part.trim()) throw new Error("Choose the part.");
+      if (needed.trim().length < 4) throw new Error("Write what is needed.");
       const w = WHEN.find((x) => x.key === when) ?? WHEN[0];
       await save({
         table: "maintenance_job",
@@ -184,11 +201,46 @@ function RequestForm({ D, m, me, onDone }: { D: ReturnType<typeof useData>; m: a
     <Card>
       <T bold style={{ fontSize: 17 }}>Request maintenance · {m.tag}</T>
       <Sub>For work that is needed but has not stopped the machine.</Sub>
-      <Field label="WHICH PART" value={part} onChangeText={setPart} />
+      <Sub>Which part</Sub>
+      <Select value={part || null} options={[...new Set(D.pm_task.filter((t) => t.machine_id === m.id).map((t) => String(t.component)))].map((c) => ({ key: c, label: c })).concat([{ key: "Other", label: "Other" }])} onChange={setPart} placeholder="Choose the part" title="Which part" />
       <Sub>When</Sub>
       <Chips options={WHEN} value={when} onChange={setWhen} />
       <Field label="WHAT IS NEEDED" value={needed} onChangeText={setNeeded} multiline />
       <Btn title="Send request" onPress={send} busy={busy} />
     </Card>
+  );
+}
+/** Record maintenance that was done, with or without a plan task. */
+export function MaintLog() {
+  const nav = useNavigation<any>();
+  const { params } = useRoute<any>();
+  const { session } = useAuth();
+  const D = useData();
+  const m = D.machine.find((x) => x.id === params.machineId);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [what, setWhat] = useState("");
+  const [mins, setMins] = useState("");
+  const { busy, run } = useAction();
+  if (!m) return <Screen><Empty text="Machine not found." /></Screen>;
+  const tasks = D.pm_task.filter((t) => t.machine_id === m.id);
+
+  const submit = () =>
+    run(async () => {
+      if (!taskId && !what.trim()) throw new Error("Choose a task or write what was done.");
+      const t = tasks.find((x) => x.id === taskId);
+      await save({ table: "pm_done", row: { id: newId(), task_id: taskId, machine_id: m.id, done_at: nowIso(), by: session!.person.id, hour_meter: Math.round(meterNow(D, m.id) * 10) / 10, minutes: mins ? Number(mins) : null, note: what.trim() || null } });
+      say("Saved", t ? `${t.task} recorded.` : "Maintenance recorded.");
+      nav.goBack();
+    });
+
+  return (
+    <Screen>
+      <H>Record maintenance done · {m.tag}</H>
+      <SectionTitle>Task from the plan (optional)</SectionTitle>
+      <Select value={taskId} options={tasks.map((t) => ({ key: t.id, label: `${t.component}: ${t.task}`, sub: t.equipment }))} onChange={setTaskId} placeholder="Not on the plan" title="Task" />
+      <Field label="What was done" value={what} onChangeText={setWhat} multiline />
+      <Field label="Minutes it took (optional)" value={mins} onChangeText={(v) => setMins(v.replace(/\D/g, ""))} keyboardType="number-pad" />
+      <Btn title="Save" onPress={submit} busy={busy} />
+    </Screen>
   );
 }
