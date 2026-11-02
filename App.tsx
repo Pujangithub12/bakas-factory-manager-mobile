@@ -17,7 +17,7 @@ import { C, F, Icon, type IconName } from "./src/ui";
 import SignIn from "./src/screens/SignIn";
 import Home, { Me, SyncStatus } from "./src/screens/Home";
 import Gate, { GateToday, Register } from "./src/screens/Gate";
-import Crew, { CorrectWorker, CrewMachines, SetPin } from "./src/screens/Crew";
+import Crew, { CorrectWorker, CrewMachines, CrewVehicles, SetPin } from "./src/screens/Crew";
 import MyMachines, { Machine, ReportProblem } from "./src/screens/Machines";
 import Weighbridge, { BagCount, TruckIn, TruckOut, WeighOut } from "./src/screens/Weighbridge";
 import Jobs, { Job } from "./src/screens/Jobs";
@@ -27,6 +27,8 @@ import LogSheet from "./src/screens/LogSheet";
 import Details from "./src/screens/Details";
 import OperatorProblems from "./src/screens/OperatorProblems";
 import MachineDetails from "./src/screens/MachineDetails";
+import DriverVehicle from "./src/screens/DriverVehicle";
+import DriverHistory from "./src/screens/DriverHistory";
 import Overview from "./src/screens/Overview";
 import People from "./src/screens/People";
 
@@ -34,7 +36,7 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const TAB_ICONS: Record<string, IconName> = {
-  CrewHome: "people-outline", FloorHome: "locate-outline", GateHome: "shield-checkmark-outline", GateToday: "list-outline", More: "grid-outline", Work: "locate-outline", Overview: "stats-chart-outline", Machines: "locate-outline", People: "people-outline", LogSheet: "clipboard-outline", Problems: "construct-outline", Details: "information-circle-outline", Me: "person-outline",
+  CrewHome: "people-outline", FloorHome: "locate-outline", GateHome: "shield-checkmark-outline", GateToday: "list-outline", More: "grid-outline", Work: "locate-outline", Overview: "stats-chart-outline", Machines: "locate-outline", People: "people-outline", LogSheet: "clipboard-outline", Problems: "construct-outline", Details: "information-circle-outline", Me: "person-outline", DriverVehicle: "car-outline", DriverHistory: "list-outline",
 };
 
 /**
@@ -52,6 +54,8 @@ function Tabs() {
   const securityOnly = roles.includes("Security") && !isAdmin && !isOperator && !roles.includes("Supervisor");
   // A supervisor (not also an operator or admin) gets Crew, Floor and Me. The badges show what needs doing.
   const supervisorOnly = roles.includes("Supervisor") && !isAdmin && !isOperator && !securityOnly;
+  // A driver (and nothing else) gets Vehicle, History and Me.
+  const driverOnly = roles.includes("Driver") && !isAdmin && !isOperator && !securityOnly && !supervisorOnly && !roles.some((r) => ["Fitter", "Store", "Weighbridge"].includes(r));
   const shift = shiftWindow(D.shift);
   const notOnDuty = new Set(D.attendance.filter((a) => shift && new Date(a.shift_start).getTime() === shift.start.getTime() && !a.on_duty_at && !a.gate_out).map((a) => a.person_id)).size;
   const crewBadge = D.person.filter((p) => p.active && !p.checked).length + notOnDuty;
@@ -88,6 +92,11 @@ function Tabs() {
           <Tab.Screen name="CrewHome" component={Crew} options={{ title: "Crew", tabBarBadge: crewBadge || undefined }} />
           <Tab.Screen name="FloorHome" component={Floor} options={{ title: "Floor", tabBarBadge: floorBadge || undefined }} />
         </>
+      ) : driverOnly ? (
+        <>
+          <Tab.Screen name="DriverVehicle" component={DriverVehicle} options={{ title: "Vehicle" }} />
+          <Tab.Screen name="DriverHistory" component={DriverHistory} options={{ title: "History" }} />
+        </>
       ) : (
         <>
           <Tab.Screen name="Work" component={isOperator ? MyMachines : Home} options={{ title: isOperator ? "Machine" : "Work" }} />
@@ -123,6 +132,7 @@ function Root() {
         <Stack.Screen name="Crew" component={Crew} options={{ title: "Shift & crew" }} />
         <Stack.Screen name="CorrectWorker" component={CorrectWorker} options={{ title: "Correct details" }} />
         <Stack.Screen name="CrewMachines" component={CrewMachines} options={{ title: "Machines" }} />
+        <Stack.Screen name="CrewVehicles" component={CrewVehicles} options={{ title: "Vehicles" }} />
         <Stack.Screen name="SetPin" component={SetPin} options={{ title: "PIN" }} />
         <Stack.Screen name="MyMachines" component={MyMachines} options={{ title: "My machine" }} />
         <Stack.Screen name="Machine" component={Machine} options={{ title: "Machine" }} />
