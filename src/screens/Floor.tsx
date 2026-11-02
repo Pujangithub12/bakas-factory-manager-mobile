@@ -1,10 +1,13 @@
 import React from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { View } from "react-native";
-import { Screen, H, Sub, Card, T, Text, Badge, Row, SectionTitle, StatusDot, Icon, C, F, Spacer, ScreenHeader, initialsOf } from "../ui";
+import { Screen, H, Sub, Card, T, Text, Row, SectionTitle, StatusDot, Icon, C, F, Spacer, ScreenHeader, initialsOf } from "../ui";
 import { useAuth } from "../auth";
 import { useData } from "../store";
-import { activeBatch, batchCode, batchMaterial, batchTickets, lastReading, machineAlerts, machineStatus, onSiteMap, openJobs, personName } from "../rules";
+import { lastReading, machineAlerts, machineStatus, onSiteMap, openJobs, personName } from "../rules";
+import { lastPower } from "../money";
+import { AlertsBanner } from "./Overview";
+import { shiftWindow } from "../time";
 import { fmtDayTime, fmtTime, MIN } from "../time";
 
 type Flag = { tone: "bad" | "warn"; icon: "warning-outline" | "construct-outline" | "time-outline"; text: string };
@@ -25,6 +28,7 @@ export default function Floor() {
   const { session } = useAuth();
   const D = useData();
   const nowMs = Date.now();
+  const lp = lastPower(D);
 
   const machines = [...D.machine].sort((a, b) => a.tag.localeCompare(b.tag)).map((m) => {
     const st = machineStatus(D, m);
@@ -51,8 +55,7 @@ export default function Floor() {
         text: `${j.problem}${j.fitter_id ? ` · ${personName(D, j.fitter_id)} on it` : " · waiting for a fitter"}${jobs.length > 1 ? ` (+${jobs.length - 1} more open)` : ""}`,
       });
     }
-    const long = alerts.find((a) => a.key === "long");
-    if (long) flags.push({ tone: "warn", icon: "warning-outline", text: `${long.text}. Was the stop missed?` });
+    if (st.run && nowMs - new Date(st.run.started_at).getTime() > 14 * 3_600_000) flags.push({ tone: "warn", icon: "warning-outline", text: "Running over 14 hours. Was the stop missed?" });
 
     const openDown = D.downtime.find((d) => d.machine_id === m.id && !d.ended_at);
     const planned = st.state === "down" && D.stop_reason.find((r) => r.id === openDown?.stop_reason_id)?.type === "Planned";
@@ -70,12 +73,20 @@ export default function Floor() {
   const running = machines.filter((x) => x.st.state === "running").length;
   const down = machines.filter((x) => x.st.state === "down").length;
   const need = machines.filter((x) => x.flags.length > 0).length;
-  const batches = D.yard.map((y) => ({ y, b: activeBatch(D, y.id) })).filter((x) => x.b);
 
   const body = (
     <Screen>
       {route.name === "Machines" || route.name === "FloorHome" ? null : <H>Floor</H>}
       <Sub>{running} of {machines.length} machines running · {onSiteMap(D).size} people on site</Sub>
+      <AlertsBanner />
+      <Card onPress={() => nav.navigate("PowerReading")} style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 14, backgroundColor: !lp || nowMs - new Date(lp.at).getTime() > 75 * 60_000 ? C.amberSoft : C.card }}>
+        <Icon name="speedometer-outline" size={24} color={C.green} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.ink }}>Electricity meter</Text>
+          <Sub>{lp ? `Last ${Number(lp.kwh_meter).toLocaleString("en-US")} kWh at ${fmtTime(lp.at)} by ${personName(D, lp.by)}` : "No reading yet"}{!lp || nowMs - new Date(lp.at).getTime() > 75 * 60_000 ? " · reading due" : ""}</Sub>
+        </View>
+        <Icon name="chevron-forward" size={18} color={C.grey} />
+      </Card>
 
       <Row style={{ gap: 12, alignItems: "stretch" }}>
         <Stat value={running} label="Running" />
@@ -106,15 +117,19 @@ export default function Floor() {
         </Card>
       ))}
 
-      <SectionTitle>Yards</SectionTitle>
-      {batches.length === 0 ? <Sub>All yards are empty.</Sub> : null}
-      {batches.map(({ y, b }) => (
-        <Card key={y.id}>
-          <Row><T bold>{batchCode(D, b!)}</T><Sub>{batchMaterial(D, b!)?.name ?? "no truck yet"}</Sub><Spacer />
-            <Badge text={b!.started_at ? "Feeding" : b!.closed_at ? "Closed" : "Filling"} tone={b!.started_at ? "info" : b!.closed_at ? "warn" : "good"} /></Row>
-          <Sub>{batchTickets(D, b!.id).length}/{y.holds_trucks ?? "-"} trucks</Sub>
-        </Card>
-      ))}
+      <SectionTitle>Vehicles</SectionTitle>
+      <Card>
+        {D.vehicle.map((v) => {
+          const os = D.vehicle_session.find((x) => x.vehicle_id === v.id && !x.stopped_at);
+          return (
+            <Row key={v.id} style={{ paddingVertical: 4 }}>
+              <T bold style={{ flex: 1 }}>{v.name}</T>
+              <Sub>{os ? `${personName(D, os.driver_id)} · ${os.job ?? ""}` : "Parked"}</Sub>
+              <Sub>{os ? `since ${fmtTime(os.started_at)}` : ""}</Sub>
+            </Row>
+          );
+        })}
+      </Card>
     </Screen>
   );
 
@@ -123,7 +138,7 @@ export default function Floor() {
   const name = session!.person.full_name;
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title={route.name === "FloorHome" ? "Floor" : "Machines"} subtitle={`${running} of ${machines.length} running`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
+      <ScreenHeader title={route.name === "FloorHome" ? "Floor" : "Machines"} subtitle={`${name} · ${shiftWindow(D.shift) ? `${shiftWindow(D.shift)!.shift.name} shift` : "Off-shift"}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
       {body}
     </View>
   );

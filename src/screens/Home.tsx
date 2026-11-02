@@ -7,7 +7,7 @@ import { clearRejected, pendingOps, rejectedList, useData, useOutboxCounts, type
 import { syncNow, useSyncState } from "../sync";
 import { fmtDateTime, fmtTime, shiftWindow } from "../time";
 import { getServerUrl } from "../api";
-import { canRun, hasRole, machineAlerts, onSiteMap, personName } from "../rules";
+import { canRun, hasRole, itemName, machineAlerts, num, onSiteMap, personName, PR_TONE, prText, toolsOut } from "../rules";
 import { roleInfo } from "../roles";
 
 type Tile = { title: string; sub: string; screen: string; icon: IconName; roles: string[] | "all"; badge?: () => { text: string; tone: "bad" | "warn" | "info" } | null };
@@ -31,7 +31,6 @@ export default function Home() {
     { title: "Bag count", sub: "Pellet bags into the store", screen: "BagCount", icon: "cube-outline", roles: ["Store", "Owner", "Manager"] },
     { title: "Maintenance jobs", sub: "Take a job, mark it fixed", screen: "Problems", icon: "construct-outline", roles: ["Fitter", "Owner", "Manager", "Supervisor"], badge: () => (openJobs ? { text: `${openJobs} open`, tone: "warn" } : null) },
     { title: "Floor", sub: "All machines, what needs a look", screen: "Floor", icon: "grid-outline", roles: ["Owner", "Manager", "Supervisor"], badge: () => (alerts ? { text: `${alerts} alert`, tone: "bad" } : null) },
-    { title: "Dashboard", sub: "Production, no rupees", screen: "Dashboard", icon: "stats-chart-outline", roles: ["Owner", "Manager"] },
     { title: "Report a problem", sub: "Goes straight to the fitters", screen: "ReportProblem", icon: "alert-circle-outline", roles: "all" },
   ];
   const shown = tiles.filter((t) => t.roles === "all" || hasRole(roles, ...t.roles));
@@ -86,6 +85,8 @@ export function Me() {
   const D = useData();
   const me = session!.person.id;
   const mobile = D.person.find((p) => p.id === me)?.mobile as string | undefined;
+  const toolsWithMe = toolsOut(D).filter((t) => t.to_person_id === me);
+  const myPrs = D.purchase_request.filter((p) => p.requested_by === me).sort((a, b) => b.requested_at.localeCompare(a.requested_at)).slice(0, 5);
 
   // This shift: gate in and out, on duty, and who is in charge.
   const w = shiftWindow(D.shift);
@@ -104,15 +105,12 @@ export function Me() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title="Me" subtitle={name} />
+      <ScreenHeader title="Your details" subtitle={`${name} · ${w ? `${w.shift.name} shift` : "Off-shift"}`} initials={initialsOf(name)} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}>
         <Card style={{ alignItems: "center", gap: 8, paddingVertical: 24 }}>
           <Avatar text={initialsOf(name)} size={84} />
           <Text style={{ fontFamily: F.head, fontSize: 32, color: C.ink }}>{name}</Text>
-          {mobile ? <Sub>{mobile}</Sub> : null}
-          <Row style={{ flexWrap: "wrap", justifyContent: "center" }}>
-            {roles.map((r) => <Badge key={r} text={roleInfo(r).label} tone="info" />)}
-          </Row>
+          <Sub>{roles.map((r) => roleInfo(r).label).join(", ")}{mobile ? ` · ${mobile}` : ""}</Sub>
         </Card>
         <Card>
           <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink }}>This shift</Text>
@@ -137,6 +135,20 @@ export function Me() {
             <Sub>The supervisor sets this.</Sub>
           </Card>
         ) : null}
+        {toolsWithMe.length ? (
+          <Card>
+            <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink }}>Tools with you</Text>
+            {toolsWithMe.map((t) => <Row key={t.id}><T style={{ flex: 1 }}>{itemName(D, t.item_id)}{num(t.qty) > 1 ? ` x ${num(t.qty)}` : ""}</T><Sub>back by {fmtTime(t.due_back)}</Sub></Row>)}
+          </Card>
+        ) : null}
+        <Card>
+          <Row>
+            <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink, flex: 1 }}>Requests</Text>
+            <Btn small kind="ghost" title="Request something" onPress={() => nav.navigate("NewPR", {})} />
+          </Row>
+          <Sub>Ask for anything the factory needs: tools, spares, safety gear.</Sub>
+          {myPrs.map((p) => <Row key={p.id}><T style={{ flex: 1 }}>{p.pr_no} · {prText(D, p)}</T><Badge text={p.status} tone={PR_TONE[p.status]} /></Row>)}
+        </Card>
         <Btn title={sync.syncing ? "Syncing..." : "Sync now"} kind="soft" onPress={() => syncNow().then(() => undefined)} busy={sync.syncing} />
         <Card onPress={() => nav.navigate("SyncStatus")} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <Icon name="alert-circle-outline" />

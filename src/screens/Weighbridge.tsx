@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Chips, confirm, say, useAction, Empty, C, F, Spacer, Icon, ScreenHeader, initialsOf, type IconName } from "../ui";
+import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Chips, confirm, say, useAction, Empty, C, F, Spacer, Icon, type IconName } from "../ui";
 import { useAuth } from "../auth";
 import { newId, save, useData, type Data } from "../store";
 import { useSyncState } from "../sync";
+import { TabScreen } from "../tabs";
 import { activeBatch, batchCode, batchMaterial, batchTickets, fillingBatch, nextChallan, num, suggestYard, ticketNet } from "../rules";
 import { fmtDateTime, fmtTime, nowIso, productionDayStart, shiftWindow, type Row as R } from "../time";
 
@@ -128,21 +129,6 @@ function YardsBody() {
         );
       })}
     </>
-  );
-}
-
-/** A tab screen: the title, "name · shift" and the avatar, then the scrolling body. */
-function TabScreen({ title, children }: { title: string; children: React.ReactNode }) {
-  const nav = useNavigation<any>();
-  const { session } = useAuth();
-  const D = useData();
-  const name = session!.person.full_name;
-  const shift = shiftWindow(D.shift)?.shift.name;
-  return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title={title} subtitle={`${name}${shift ? ` · ${shift} shift` : ""}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 12 }} keyboardShouldPersistTaps="handled">{children}</ScrollView>
-    </View>
   );
 }
 

@@ -5,7 +5,8 @@ import { Badge, Btn, C, Card, Empty, F, Icon, Row, ScreenHeader, Spacer, Sub, T,
 import { useAuth } from "../auth";
 import { useData } from "../store";
 import { canRun, machineOf, onSiteMap, personName } from "../rules";
-import { DAY, fmtDayTime } from "../time";
+import { DAY, fmtDayTime, shiftWindow } from "../time";
+import { GateBanner, useMyMachines } from "./Machines";
 
 const ms = (v: any) => new Date(v).getTime();
 
@@ -33,7 +34,8 @@ export default function OperatorProblems() {
   const nowMs = Date.now();
 
   const mine = new Set(D.machine.filter((m) => canRun(D, me, m, roles)).map((m) => m.id as string));
-  const running = D.machine_run.find((r) => !r.stopped_at && r.operator_id === me);
+  const { current } = useMyMachines();
+  const w = shiftWindow(D.shift);
   const checkedIn = onSiteMap(D).has(me);
 
   const jobs = D.maintenance_job
@@ -43,12 +45,12 @@ export default function OperatorProblems() {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScreenHeader title="Problems" subtitle={`${open} open`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
+      <ScreenHeader title="Problems" subtitle={`${name} · ${w ? `${w.shift.name} shift` : "Off-shift"}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }}>
         {checkedIn ? (
-          <Btn title="Report a problem" onPress={() => nav.navigate("ReportProblem", running ? { machineId: running.machine_id } : undefined)} />
+          <Btn title="Report a problem" onPress={() => nav.navigate("ReportProblem", current ? { machineId: current.id } : undefined)} />
         ) : (
-          <Badge text="You are not checked in at the gate" tone="warn" />
+          <GateBanner />
         )}
         <Sub>Problems on your machines in the last 3 days. Maintenance sees them as soon as you send.</Sub>
 

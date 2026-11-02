@@ -113,3 +113,21 @@ export function fiscalYearStart(at = new Date()): Date {
   if (at < fy(y)) y -= 1;
   return fy(y);
 }
+
+/** "HH:MM" in Nepal time. */
+export const nptClock = (at = new Date()) => new Date(at.getTime() + NPT_MS).toISOString().slice(11, 16);
+
+/** A typed "HH:MM" (Nepal time) as today's instant; null if it is not a time. A time more than 12 hours ahead is read as yesterday's. */
+export function clockToDate(hhmm: string, at = new Date()): Date | null {
+  const m = /^(\d{1,2})[:.](\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  const n = new Date(at.getTime() + NPT_MS);
+  let t = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), h, mi) - NPT_MS;
+  if (t > at.getTime() + 12 * HOUR) t -= DAY;
+  return new Date(t);
+}
+
+/** The start (06:00 Nepal time) of a YYYY-MM-DD production day. */
+export const dayStartOf = (ymd: string) => new Date(Date.parse(`${ymd}T06:00:00Z`) - NPT_MS);
