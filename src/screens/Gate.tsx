@@ -31,6 +31,13 @@ export default function Gate() {
 
   const site = useMemo(() => onSiteMap(D), [D.attendance]);
   const running = useMemo(() => busyPeople(D), [D.machine_run, D.run_helper]);
+  // Drivers still working a vehicle: they cannot be checked out either.
+  const driving = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const x of D.vehicle_session) if (!x.stopped_at) m.set(x.driver_id, x);
+    return m;
+  }, [D.vehicle_session]);
+  const vehicleName = (id: string) => D.vehicle.find((v) => v.id === id)?.name ?? "a vehicle";
   const dayStart = productionDayStart().getTime();
 
   // Latest gate record of each person
@@ -76,6 +83,7 @@ export default function Gate() {
   const checkOut = (ids: string[]) =>
     run(async () => {
       const blocked: string[] = [];
+      const drivingBlocked: string[] = [];
       const done: string[] = [];
       const writes = [];
       for (const id of ids) {
@@ -86,12 +94,24 @@ export default function Gate() {
           blocked.push(`${D.person.find((p) => p.id === id)?.full_name} (${machineOf(D, r.machine_id)?.tag})`);
           continue;
         }
-        writes.push({ table: "attendance", row: { id: a.id, gate_out: nowIso() } });
+        const dv = driving.get(id);
+        if (dv) {
+          drivingBlocked.push(`${D.person.find((p) => p.id === id)?.full_name} (${vehicleName(dv.vehicle_id)})`);
+          continue;
+        }
+        // Close every open gate record of this person, not only the newest. An older record that was never closed would
+        // otherwise show them as checked in again the moment the newest one is closed.
+        const stamp = nowIso();
+        const openRows = D.attendance.filter((x) => x.person_id === id && x.gate_in && !x.gate_out);
+        for (const o of openRows.length ? openRows : [a]) writes.push({ table: "attendance", row: { id: o.id, gate_out: stamp } });
         done.push(id);
       }
       if (writes.length) await save(...writes);
       setSel((s) => s.filter((id) => !done.includes(id))); // anyone refused stays selected
-      if (blocked.length) say("Still running a machine", `${blocked.join(", ")} cannot be checked out until the run is stopped.`);
+      const notes: string[] = [];
+      if (blocked.length) notes.push(`${blocked.join(", ")} cannot be checked out until the run is stopped.`);
+      if (drivingBlocked.length) notes.push(`${drivingBlocked.join(", ")} cannot be checked out until the vehicle work is stopped.`);
+      if (notes.length) say(blocked.length ? "Still running a machine" : "Still working a vehicle", notes.join("\n\n"));
     });
 
   const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
@@ -155,7 +175,7 @@ export default function Gate() {
                       <Text style={{ fontSize: 17, fontWeight: "700", color: C.ink }}>{p.full_name}</Text>
                       {!p.checked ? <View style={{ backgroundColor: "#fdf0d8", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 }}><Text style={{ color: C.amber, fontWeight: "700", fontSize: 13 }}>New</Text></View> : null}
                     </Row>
-                    <Text style={{ color: C.sub, fontSize: 14 }}>{sub}{running.get(p.id) ? ` · running ${machineOf(D, running.get(p.id)!.machine_id)?.tag ?? ""}` : ""}</Text>
+                    <Text style={{ color: C.sub, fontSize: 14 }}>{sub}{running.get(p.id) ? ` · running ${machineOf(D, running.get(p.id)!.machine_id)?.tag ?? ""}` : ""}{driving.get(p.id) ? ` · working ${vehicleName(driving.get(p.id).vehicle_id)}` : ""}</Text>
                   </View>
                   {inside ? (
                     <Pressable disabled={saving} onPress={() => checkOut([p.id])} style={({ pressed }) => [{ minWidth: 80, height: 48, borderRadius: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: C.line, alignItems: "center", justifyContent: "center" }, pressed && { opacity: 0.7 }]}>
