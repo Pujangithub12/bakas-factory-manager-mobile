@@ -19,7 +19,7 @@ import Home, { Me, SyncStatus } from "./src/screens/Home";
 import Gate, { GateToday, Register } from "./src/screens/Gate";
 import Crew, { CorrectWorker, CrewMachines, SetPin } from "./src/screens/Crew";
 import MyMachines, { Machine, ReportProblem } from "./src/screens/Machines";
-import Weighbridge, { BagCount, TruckIn, TruckOut, WeighOut } from "./src/screens/Weighbridge";
+import Weighbridge, { BagCount, Trucks, TruckIn, TruckOut, WeighOut, YardsTab } from "./src/screens/Weighbridge";
 import Jobs, { Job } from "./src/screens/Jobs";
 import Floor from "./src/screens/Floor";
 import Dashboard, { Detail } from "./src/screens/Dashboard";
@@ -34,7 +34,7 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const TAB_ICONS: Record<string, IconName> = {
-  CrewHome: "people-outline", FloorHome: "locate-outline", GateHome: "shield-checkmark-outline", GateToday: "list-outline", More: "grid-outline", Work: "locate-outline", Overview: "stats-chart-outline", Machines: "locate-outline", People: "people-outline", LogSheet: "clipboard-outline", Problems: "construct-outline", Details: "information-circle-outline", Me: "person-outline",
+  Trucks: "bus-outline", YardsTab: "layers-outline", CrewHome: "people-outline", FloorHome: "locate-outline", GateHome: "shield-checkmark-outline", GateToday: "list-outline", More: "grid-outline", Work: "locate-outline", Overview: "stats-chart-outline", Machines: "locate-outline", People: "people-outline", LogSheet: "clipboard-outline", Problems: "construct-outline", Details: "information-circle-outline", Me: "person-outline",
 };
 
 /**
@@ -52,6 +52,8 @@ function Tabs() {
   const securityOnly = roles.includes("Security") && !isAdmin && !isOperator && !roles.includes("Supervisor");
   // A supervisor (not also an operator or admin) gets Crew, Floor and Me. The badges show what needs doing.
   const supervisorOnly = roles.includes("Supervisor") && !isAdmin && !isOperator && !securityOnly;
+  // A weighbridge clerk (and nothing else) gets Trucks, Yards and Me.
+  const weighbridgeOnly = roles.includes("Weighbridge") && !isAdmin && !isOperator && !securityOnly && !roles.includes("Supervisor");
   const shift = shiftWindow(D.shift);
   const notOnDuty = new Set(D.attendance.filter((a) => shift && new Date(a.shift_start).getTime() === shift.start.getTime() && !a.on_duty_at && !a.gate_out).map((a) => a.person_id)).size;
   const crewBadge = D.person.filter((p) => p.active && !p.checked).length + notOnDuty;
@@ -82,6 +84,11 @@ function Tabs() {
         <>
           <Tab.Screen name="GateHome" component={Gate} options={{ title: "Gate" }} />
           <Tab.Screen name="GateToday" component={GateToday} options={{ title: "Today" }} />
+        </>
+      ) : weighbridgeOnly ? (
+        <>
+          <Tab.Screen name="Trucks" component={Trucks} />
+          <Tab.Screen name="YardsTab" component={YardsTab} options={{ title: "Yards" }} />
         </>
       ) : supervisorOnly ? (
         <>
