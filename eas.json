@@ -4,11 +4,11 @@
     "preview": {
       "distribution": "internal",
       "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://bakas-factory-manager-backend-1.onrender.com" }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://bakas-factory-manager-backend-1.onrender.com" }
     }
   }
 }
