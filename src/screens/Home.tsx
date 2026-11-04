@@ -12,12 +12,10 @@ import { roleInfo } from "../roles";
 
 type Tile = { title: string; sub: string; screen: string; icon: IconName; roles: string[] | "all"; badge?: () => { text: string; tone: "bad" | "warn" | "info" } | null };
 
-/** The first tab for everyone except operators (who get their machine): the screens their roles open. */
-export default function Home() {
-  const nav = useNavigation<any>();
-  const { session, roles } = useAuth();
+/** The screens this person's roles open. */
+function useTiles(): Tile[] {
+  const { roles } = useAuth();
   const D = useData();
-  const name = session!.person.full_name;
 
   const openJobs = D.maintenance_job.filter((j) => !j.fixed_at).length;
   const newWorkers = D.person.filter((p) => p.active && !p.checked && onSiteMap(D).has(p.id)).length;
@@ -33,26 +31,43 @@ export default function Home() {
     { title: "Floor", sub: "All machines, what needs a look", screen: "Floor", icon: "grid-outline", roles: ["Owner", "Manager", "Supervisor"], badge: () => (alerts ? { text: `${alerts} alert`, tone: "bad" } : null) },
     { title: "Report a problem", sub: "Goes straight to the fitters", screen: "ReportProblem", icon: "alert-circle-outline", roles: "all" },
   ];
-  const shown = tiles.filter((t) => t.roles === "all" || hasRole(roles, ...t.roles));
+  return tiles.filter((t) => t.roles === "all" || hasRole(roles, ...t.roles));
+}
+
+function TileList({ tiles }: { tiles: Tile[] }) {
+  const nav = useNavigation<any>();
+  return (
+    <>
+      {tiles.map((t) => {
+        const b = t.badge?.();
+        return (
+          <Card key={t.screen} onPress={() => nav.navigate(t.screen)} style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: 14, borderRadius: 18 }}>
+            <IconTile name={t.icon} size={52} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: C.ink }}>{t.title}</Text>
+              <Text style={{ color: C.sub, fontSize: 14 }}>{t.sub}</Text>
+            </View>
+            {b ? <Badge text={b.text} tone={b.tone} /> : null}
+          </Card>
+        );
+      })}
+    </>
+  );
+}
+
+/** The first tab for everyone except operators (who get their machine): the screens their roles open. */
+export default function Home() {
+  const nav = useNavigation<any>();
+  const { session, roles } = useAuth();
+  const name = session!.person.full_name;
+  const shown = useTiles();
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <ScreenHeader title="Factory" subtitle={`${name} · ${roles.map((r) => roleInfo(r).label).join(", ") || "No role yet"}`} initials={initialsOf(name)} onAvatar={() => nav.navigate("Me")} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 12 }}>
         {shown.length === 0 ? <Sub>Your role has no screens yet. Ask the supervisor.</Sub> : null}
-        {shown.map((t) => {
-          const b = t.badge?.();
-          return (
-            <Card key={t.screen} onPress={() => nav.navigate(t.screen)} style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: 14, borderRadius: 18 }}>
-              <IconTile name={t.icon} size={52} />
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: C.ink }}>{t.title}</Text>
-                <Text style={{ color: C.sub, fontSize: 14 }}>{t.sub}</Text>
-              </View>
-              {b ? <Badge text={b.text} tone={b.tone} /> : null}
-            </Card>
-          );
-        })}
+        <TileList tiles={shown} />
       </ScrollView>
     </View>
   );
@@ -95,6 +110,9 @@ export function Me() {
     : undefined;
   const onSite = onSiteMap(D).has(me);
   const inCharge = w ? D.shift_in_charge.find((s) => new Date(s.shift_start).getTime() === w.start.getTime()) : undefined;
+  // An operator who is also Security, Store, Fitter, Weighbridge or Supervisor finds those screens here.
+  const allTiles = useTiles();
+  const otherScreens = roles.includes("Operator") && !roles.includes("Owner") && !roles.includes("Manager") ? allTiles.filter((t) => !["MyMachines", "ReportProblem"].includes(t.screen)) : [];
   const myMachines = roles.includes("Operator") ? D.machine.filter((m) => canRun(D, me, m, roles)).sort((a, b) => a.tag.localeCompare(b.tag)) : [];
   const Kv = ({ label, value }: { label: string; value: string }) => (
     <View style={{ flexBasis: "47%", flexGrow: 1, gap: 2 }}>
@@ -134,6 +152,12 @@ export function Me() {
             </Row>
             <Sub>The supervisor sets this.</Sub>
           </Card>
+        ) : null}
+        {otherScreens.length ? (
+          <>
+            <SectionTitle>Your other screens</SectionTitle>
+            <TileList tiles={otherScreens} />
+          </>
         ) : null}
         {toolsWithMe.length ? (
           <Card>

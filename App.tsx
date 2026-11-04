@@ -57,7 +57,7 @@ function Tabs() {
   const on = (key: string) => !D.phone_screen.some((r) => r.screen === key && r.is_on === false);
   const isOperator = roles.includes("Operator");
   const isAdmin = roles.includes("Owner") || roles.includes("Manager");
-  // An operator who also has other roles (Security, Weighbridge, Store, Fitter, Supervisor) gets their screens on a More tab.
+  // An operator who also has other roles (Security, Weighbridge, Store, Fitter, Supervisor) finds those screens on the Me tab.
   // A security guard (and nothing else) gets Gate, Today and Me, like the design.
   const securityOnly = roles.includes("Security") && !isAdmin && !isOperator && !roles.includes("Supervisor");
   // A supervisor (not also an operator or admin) gets Crew, Floor and Me. The badges show what needs doing.
@@ -74,7 +74,6 @@ function Tabs() {
   const notOnDuty = new Set(D.attendance.filter((a) => shift && new Date(a.shift_start).getTime() === shift.start.getTime() && !a.on_duty_at && !a.gate_out).map((a) => a.person_id)).size;
   const crewBadge = D.person.filter((p) => p.active && !p.checked).length + notOnDuty;
   const floorBadge = supervisorOnly ? D.machine.reduce((n, m) => n + machineAlerts(D, m).length, 0) : 0;
-  const moreScreens = isOperator && roles.some((r) => ["Security", "Weighbridge", "Store", "Fitter", "Supervisor"].includes(r));
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -134,9 +133,8 @@ function Tabs() {
         <>
           <Tab.Screen name="Work" component={isOperator ? MyMachines : Home} options={{ title: isOperator ? "Machine" : "Work" }} />
           {isOperator && on("operator.sheet") ? <Tab.Screen name="LogSheet" component={LogSheet} options={{ title: "Log sheet" }} /> : null}
-          {moreScreens ? <Tab.Screen name="More" component={Home} /> : null}
           {on("operator.jobs") ? <Tab.Screen name="Problems" component={isOperator ? OperatorProblems : Jobs} /> : null}
-          {!moreScreens && on("operator.info") ? <Tab.Screen name="Details" component={isOperator ? MachineDetails : Details} /> : null}
+          {on("operator.info") ? <Tab.Screen name="Details" component={isOperator ? MachineDetails : Details} /> : null}
         </>
       )}
       <Tab.Screen name="Me" component={Me} />

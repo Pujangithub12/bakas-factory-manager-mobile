@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { ScrollView, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { Badge, Btn, C, Card, Chips, Empty, F, Field, Icon, Pill, Row, ScreenHeader, SectionTitle, Spacer, Sub, T, Text, initialsOf, useAction } from "../ui";
 import { useAuth } from "../auth";
@@ -174,17 +175,13 @@ export default function DriverVehicle() {
 
           <View style={{ marginTop: 8, gap: 8 }}>
             {os ? (
-              <Btn title={panel === "stop" ? "Close" : "Stop work"} kind={panel === "stop" ? "ghost" : "danger"} disabled={!ok} onPress={() => setPanel(panel === "stop" ? null : "stop")} />
+              <Btn title="Stop work" kind="danger" disabled={!ok} onPress={() => setPanel("stop")} />
             ) : (
-              <Btn title={panel === "start" ? "Close" : "Start work"} kind={panel === "start" ? "ghost" : "primary"} disabled={!ok} onPress={() => setPanel(panel === "start" ? null : "start")} />
+              <Btn title="Start work" disabled={!ok} onPress={() => setPanel("start")} />
             )}
-            <Btn title={panel === "fuel" ? "Close" : "Add diesel"} kind={panel === "fuel" ? "ghost" : "soft"} disabled={!ok} onPress={() => setPanel(panel === "fuel" ? null : "fuel")} />
+            <Btn title="Add diesel" kind="soft" disabled={!ok} onPress={() => setPanel("fuel")} />
           </View>
         </View>
-
-        {panel === "start" && !os ? <StartPanel key={v.id} v={v} me={me} last={last} onDone={close} /> : null}
-        {panel === "stop" && os ? <StopPanel key={os.id} os={os} v={v} onDone={close} /> : null}
-        {panel === "fuel" ? <FuelPanel key={v.id} v={v} me={me} last={last} onDone={close} /> : null}
 
         <SectionTitle>Your entries today</SectionTitle>
         <Card>
@@ -197,7 +194,47 @@ export default function DriverVehicle() {
           ))}
         </Card>
       </ScrollView>
+
+      <Sheet visible={panel === "start" && !os} title={`Start work · ${v.name}`} onClose={close}>
+        <StartPanel key={v.id} v={v} me={me} last={last} onDone={close} />
+      </Sheet>
+      <Sheet visible={panel === "stop" && !!os} title={`Stop work · ${v.name}`} onClose={close}>
+        {os ? <StopPanel key={os.id} os={os} onDone={close} /> : null}
+      </Sheet>
+      <Sheet visible={panel === "fuel"} title={`Add diesel · ${v.name}`} onClose={close}>
+        <FuelPanel key={v.id} v={v} me={me} last={last} onDone={close} />
+      </Sheet>
     </View>
+  );
+}
+
+/** A form that slides up from the bottom: a title, Close at the top right, and the form below. */
+function Sheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: "flex-end" }}>
+        <Pressable onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.35)" }} />
+        <View style={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18 + insets.bottom, maxHeight: "90%" }}>
+          <View style={{ alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: C.line, marginBottom: 14 }} />
+          <Row style={{ marginBottom: 6 }}>
+            <Text style={{ flex: 1, fontFamily: F.head, fontSize: 30, lineHeight: 34, color: C.ink }}>{title}</Text>
+            <Pressable onPress={onClose} hitSlop={12}><Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.sub }}>Close</Text></Pressable>
+          </Row>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingTop: 4 }}>{children}</ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+/** Cancel and the main action, side by side. */
+function SheetButtons({ onCancel, children }: { onCancel: () => void; children: React.ReactNode }) {
+  return (
+    <Row style={{ gap: 12, marginTop: 4 }}>
+      <View style={{ flex: 1 }}><Btn title="Cancel" kind="ghost" onPress={onCancel} /></View>
+      <View style={{ flex: 1 }}>{children}</View>
+    </Row>
   );
 }
 
@@ -219,18 +256,17 @@ function StartPanel({ v, me, last, onDone }: { v: any; me: string; last: number 
     });
 
   return (
-    <Card>
-      <T bold style={{ fontSize: 17 }}>Start work · {v.name}</T>
+    <>
       <Field label="HOUR METER NOW" value={meter} onChangeText={setMeter} keyboardType="decimal-pad" />
       {last != null ? <Sub>Last reading {h1(last)} h</Sub> : null}
       <Sub>Job</Sub>
       <Chips options={PURPOSES.map((p) => ({ key: p, label: p }))} value={job} onChange={setJob} />
-      <Btn title="Start work" onPress={go} busy={busy} />
-    </Card>
+      <SheetButtons onCancel={onDone}><Btn title="Start work" onPress={go} busy={busy} /></SheetButtons>
+    </>
   );
 }
 
-function StopPanel({ os, v, onDone }: { os: any; v: any; onDone: () => void }) {
+function StopPanel({ os, onDone }: { os: any; onDone: () => void }) {
   const [meter, setMeter] = useState("");
   const { busy, run } = useAction();
   const start = Number(os.meter_start);
@@ -247,13 +283,14 @@ function StopPanel({ os, v, onDone }: { os: any; v: any; onDone: () => void }) {
     });
 
   return (
-    <Card>
-      <T bold style={{ fontSize: 17 }}>Stop work · {v.name}</T>
-      <Sub>Started {fmtTime(os.started_at)} at {h1(start)} h</Sub>
+    <>
+      <Sub>Started {fmtTime(os.started_at)} at {start.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h</Sub>
       <Field label="HOUR METER NOW" value={meter} onChangeText={setMeter} keyboardType="decimal-pad" />
-      <Sub>{m != null ? `${h1(m - start)} hours worked.` : "Enter the reading to see hours worked."}</Sub>
-      <Btn title="Stop work" kind="danger" onPress={go} busy={busy} />
-    </Card>
+      <View style={{ backgroundColor: C.amberSoft, borderRadius: 12, padding: 14 }}>
+        <Text style={{ color: C.ink, fontSize: 15 }}>{m != null ? `${h1(m - start)} hours worked.` : "Enter the reading to see hours worked."}</Text>
+      </View>
+      <SheetButtons onCancel={onDone}><Btn title="Stop work" kind="danger" onPress={go} busy={busy} /></SheetButtons>
+    </>
   );
 }
 
@@ -274,12 +311,11 @@ function FuelPanel({ v, me, last, onDone }: { v: any; me: string; last: number |
     });
 
   return (
-    <Card>
-      <T bold style={{ fontSize: 17 }}>Add diesel · {v.name}</T>
+    <>
       <Sub>Write it down at every fill so diesel use per hour can be worked out.</Sub>
       <Field label="LITRES FILLED" value={litres} onChangeText={setLitres} keyboardType="number-pad" />
       <Field label="HOUR METER AT THE FILL" value={meter} onChangeText={setMeter} keyboardType="decimal-pad" />
-      <Btn title="Save fill" onPress={go} busy={busy} />
-    </Card>
+      <SheetButtons onCancel={onDone}><Btn title="Save fill" onPress={go} busy={busy} /></SheetButtons>
+    </>
   );
 }

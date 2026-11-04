@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Linking, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text, Field, Btn, Card, Badge, Row, C, F, Icon, IconTile, PinPad } from "../ui";
 import { isKnownOnDevice, loadPeople, loadRoles, loadStatus, roleKnownOnDevice, useAuth, type PersonOption, type RoleCount } from "../auth";
 import { SIGN_IN_FOOTER, SIGN_IN_ROLES, roleInfo } from "../roles";
+import { api, ApiError } from "../api";
 
 const PIN_LENGTH = 6;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** The token in a link like bakas://reset?token=... (the emailed reset page offers to open the app this way). */
+const resetTokenOf = (url?: string | null) => (url && /reset/.test(url) ? /[?&]token=([A-Za-z0-9_-]{43})(?:&|$)/.exec(url)?.[1] ?? null : null);
 
 /** Sign in: the first run creates the one Owner; after that pick a role, then your name, then enter the 6-digit PIN. */
 export default function SignIn() {
   const { signIn, setupOwner } = useAuth();
-  const [mode, setMode] = useState<"loading" | "setup" | "pick" | "people" | "pin">("loading");
+  const [mode, setMode] = useState<"loading" | "setup" | "pick" | "people" | "pin" | "forgot" | "reset">("loading");
   const [roles, setRoles] = useState<RoleCount[]>([]);
   const [known, setKnown] = useState<Record<string, boolean>>({});
   const [people, setPeople] = useState<PersonOption[]>([]);
@@ -19,6 +23,8 @@ export default function SignIn() {
   const [pick, setPick] = useState<string | null>(null);
   const [person, setPerson] = useState<PersonOption | null>(null);
   const [msg, setMsg] = useState("");
+  const [resetToken, setResetToken] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
 
   const refreshPeople = async () => {
     try {
@@ -50,6 +56,17 @@ export default function SignIn() {
   };
   useEffect(() => { load(); }, []);
 
+  // A reset link opened on this phone (bakas://reset?token=...) goes straight to choosing a new PIN.
+  useEffect(() => {
+    const open = (url?: string | null) => {
+      const t = resetTokenOf(url);
+      if (t) { setResetToken(t); setMode("reset"); }
+    };
+    Linking.getInitialURL().then(open).catch(() => {});
+    const sub = Linking.addEventListener("url", (e) => open(e.url));
+    return () => sub.remove();
+  }, []);
+
   const Brand = () => (
     <Row style={{ gap: 14, marginBottom: 8 }}>
       <View style={{ width: 62, height: 62, borderRadius: 16, backgroundColor: C.green, alignItems: "center", justifyContent: "center" }}>
@@ -67,6 +84,12 @@ export default function SignIn() {
   }
 
   if (mode === "setup") return <OwnerSetup onDone={setupOwner} brand={<Brand />} />;
+
+  if (mode === "forgot") return <ForgotPin onBack={() => setMode("pick")} />;
+
+  if (mode === "reset" && resetToken) {
+    return <ResetPin token={resetToken} onBack={() => { setResetToken(null); setMode("pick"); }} onDone={() => { setResetToken(null); setNotice("Your PIN is changed. Sign in with it now."); setMode("pick"); }} />;
+  }
 
   if (mode === "pin" && pick && person) {
     return (
@@ -141,7 +164,9 @@ export default function SignIn() {
             </Card>
           );
         })}
+        {notice ? <Text style={{ color: C.ok, fontSize: 15 }}>{notice}</Text> : null}
         {msg ? <Text style={{ color: C.red }}>{msg}</Text> : null}
+        {!offline ? <Btn title="Forgot your PIN?" kind="ghost" small onPress={() => { setNotice(""); setMode("forgot"); }} /> : null}
         <Text style={{ color: C.sub, fontSize: 14, lineHeight: 20, marginTop: 6 }}>{SIGN_IN_FOOTER}</Text>
         <Btn title="Try again" kind="ghost" small onPress={load} />
       </ScrollView>
@@ -177,11 +202,12 @@ function PinScreen({ label, title, offline, onBack, onPin }: { label: string; ti
 }
 
 /** First run only: name, then choose and confirm a 6-digit PIN. This person becomes the Owner. */
-function OwnerSetup({ onDone, brand }: { onDone: (name: string, pin: string) => Promise<void>; brand: React.ReactNode }) {
+function OwnerSetup({ onDone, brand }: { onDone: (name: string, pin: string, email?: string) => Promise<void>; brand: React.ReactNode }) {
   const [step, setStep] = useState<"name" | "pin" | "confirm">("name");
   const [name, setName] = useState("");
   const [first, setFirst] = useState("");
   const [mismatch, setMismatch] = useState(false);
+  const [email, setEmail] = useState("");
 
   if (step === "name") {
     return (
@@ -193,7 +219,8 @@ function OwnerSetup({ onDone, brand }: { onDone: (name: string, pin: string) => 
             <Text style={{ color: C.sub, fontSize: 17 }}>Set up the Owner. The Owner is the super admin and decides who else gets access.</Text>
           </View>
           <Field label="YOUR NAME" value={name} onChangeText={setName} autoCapitalize="words" />
-          <Btn title="Continue" disabled={name.trim().length < 2} onPress={() => setStep("pin")} />
+          <Field label="EMAIL (OPTIONAL)" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" hint="Used only to reset your PIN if you forget it." />
+          <Btn title="Continue" disabled={name.trim().length < 2 || (email.trim() !== "" && !EMAIL_RE.test(email.trim()))} onPress={() => setStep("pin")} />
         </ScrollView>
       </SafeAreaView>
     );
@@ -219,7 +246,84 @@ function OwnerSetup({ onDone, brand }: { onDone: (name: string, pin: string) => 
           setStep("pin");
           return;
         }
-        await onDone(name.trim(), pin);
+        await onDone(name.trim(), pin, email.trim().toLowerCase() || undefined);
+      }}
+    />
+  );
+}
+
+/** Forgot the PIN: enter the email on the account. The answer is the same whether or not the account exists. */
+function ForgotPin({ onBack }: { onBack: () => void }) {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState("");
+  const [err, setErr] = useState("");
+  const send = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await api<{ message: string }>("/auth/forgot", { body: { email: email.trim().toLowerCase() } });
+      setSent(r.message);
+    } catch {
+      setErr("Cannot reach the server. Try again with signal.");
+    }
+    setBusy(false);
+  };
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
+      <ScrollView contentContainerStyle={{ padding: 20, gap: 14 }} keyboardShouldPersistTaps="handled">
+        <View style={{ height: 44, justifyContent: "center" }}>
+          <Pressable onPress={onBack} hitSlop={12} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Icon name="chevron-back" size={20} color={C.ink} />
+            <Text style={{ fontSize: 17, color: C.ink, fontWeight: "600" }}>Back</Text>
+          </Pressable>
+        </View>
+        <Text style={{ fontFamily: F.head, fontSize: 44, color: C.ink, lineHeight: 48 }}>Forgot your PIN?</Text>
+        <Text style={{ color: C.sub, fontSize: 17 }}>Enter the email on your account and we will send you a link to choose a new PIN. The link works once, for 20 minutes.</Text>
+        {sent ? (
+          <Text style={{ color: C.ink, fontSize: 17, lineHeight: 24 }}>{sent} Check your email, then open the link.</Text>
+        ) : (
+          <>
+            <Field label="EMAIL" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+            {err ? <Text style={{ color: C.red }}>{err}</Text> : null}
+            <Btn title="Send link" busy={busy} disabled={!EMAIL_RE.test(email.trim())} onPress={send} />
+          </>
+        )}
+        <Text style={{ color: C.sub, fontSize: 14, lineHeight: 20 }}>Only the Owner and Managers have an email on their account. Everyone else: ask the Owner or a Manager to set your PIN in Users &amp; Roles.</Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+/** Choose the new PIN twice, then send it with the token from the emailed link. */
+function ResetPin({ token, onBack, onDone }: { token: string; onBack: () => void; onDone: () => void }) {
+  const [first, setFirst] = useState("");
+  const [mismatch, setMismatch] = useState(false);
+  return (
+    <PinScreen
+      key={first ? "confirm" : "pin"}
+      label="New PIN"
+      title={first ? "Enter it again to confirm" : mismatch ? "The PINs did not match. Choose a PIN again" : `Choose a new ${PIN_LENGTH}-digit PIN`}
+      onBack={first ? () => setFirst("") : onBack}
+      onPin={async (pin) => {
+        if (!first) {
+          if ("0123456789".includes(pin) || "9876543210".includes(pin)) return "Choose a PIN that is not a run like 123456";
+          setMismatch(false);
+          setFirst(pin);
+          return;
+        }
+        if (pin !== first) {
+          setFirst("");
+          setMismatch(true);
+          return;
+        }
+        try {
+          await api("/auth/reset", { body: { token, pin } });
+        } catch (e) {
+          setFirst("");
+          return e instanceof ApiError ? e.message : "Cannot reach the server. Try again with signal.";
+        }
+        onDone();
       }}
     />
   );
