@@ -80,6 +80,13 @@ export function shiftForArrival(shifts: Row[], at = new Date()): ShiftWindow | n
   return next && next.start.getTime() - at.getTime() <= HOUR ? next : cur;
 }
 
+/** The shift columns of a gate record. With no shift running (or none set up) the guard can still check people in:
+ *  shift_id stays empty and shift_start is the time of arrival. */
+export function gateShift(shifts: Row[], at = new Date()): { shift_id: string | null; shift_start: string } {
+  const w = shiftForArrival(shifts, at);
+  return { shift_id: w ? w.shift.id : null, shift_start: (w ? w.start : at).toISOString() };
+}
+
 /** The production day starts at 06:00 Nepal time. */
 export function productionDayStart(at = new Date()): Date {
   const n = npt(at);

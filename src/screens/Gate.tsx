@@ -5,7 +5,7 @@ import { Screen, H, Sub, Text, Btn, Field, Chips, SectionTitle, Icon, ScreenHead
 import { useAuth } from "../auth";
 import { newId, save, useData } from "../store";
 import { busyPeople, machineOf, onSiteMap, rolesOf } from "../rules";
-import { fmtTime, nowIso, productionDayStart, shiftForArrival, shiftWindow, type Row as R } from "../time";
+import { fmtTime, gateShift, nowIso, productionDayStart, shiftWindow, type Row as R } from "../time";
 import { ROLE_LIST, grantableRoles, roleInfo } from "../roles";
 
 const GROUPS: Record<string, string> = {
@@ -70,11 +70,9 @@ export default function Gate() {
 
   const checkIn = (ids: string[]) =>
     run(async () => {
-      const w = shiftForArrival(D.shift);
-      if (!w) throw new Error("No shifts are set up yet.");
       const writes = ids.filter((id) => !site.has(id)).map((id) => ({
         table: "attendance",
-        row: { id: newId(), person_id: id, shift_id: w.shift.id, shift_start: w.start.toISOString(), gate_in: nowIso(), gate_out: null, gate_by: me, on_duty_at: null, on_duty_by: null },
+        row: { id: newId(), person_id: id, ...gateShift(D.shift), gate_in: nowIso(), gate_out: null, gate_by: me, on_duty_at: null, on_duty_by: null },
       }));
       if (writes.length) await save(...writes);
       setSel((s) => s.filter((id) => !ids.includes(id)));
@@ -262,8 +260,6 @@ export function Register() {
       if (!worksAs) throw new Error("Choose what the person works as");
       if (D.person.some((p) => p.full_name.trim().toLowerCase() === full.toLowerCase())) throw new Error("A person with this name is already registered. Search for them at the gate.");
       if (D.person.some((p) => p.mobile === mobile)) throw new Error("This mobile number is already registered.");
-      const w = shiftForArrival(D.shift);
-      if (!w) throw new Error("No shifts are set up yet.");
       const id = newId();
       const now = nowIso();
       // Management confirms on the spot; a guard's registration shows as "New" until the supervisor confirms.
@@ -276,7 +272,7 @@ export function Register() {
           },
         },
         { table: "person_role", row: { person_id: id, role: worksAs, is_main: true } },
-        { table: "attendance", row: { id: newId(), person_id: id, shift_id: w.shift.id, shift_start: w.start.toISOString(), gate_in: now, gate_out: null, gate_by: me, on_duty_at: null, on_duty_by: null } }
+        { table: "attendance", row: { id: newId(), person_id: id, ...gateShift(D.shift), gate_in: now, gate_out: null, gate_by: me, on_duty_at: null, on_duty_by: null } }
       );
       nav.goBack();
     });
