@@ -170,12 +170,6 @@ export default function Crew() {
             In-charge
           </Text>
 
-          {D.shift.length === 0 ? (
-            <Sub>
-              No shifts have reached this phone yet. Check the connection, and that Day and Night are in Setup lists, Shifts on the laptop.
-            </Sub>
-          ) : null}
-
           <View style={{ gap: 6 }}>
             <Text style={{ fontSize: 15, fontWeight: "700", color: C.ink }}>
               {shiftLabel(now, true)}

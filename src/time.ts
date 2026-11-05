@@ -52,11 +52,18 @@ const todMinutes = (v: any) => {
 
 export type ShiftWindow = { shift: Row; start: Date; end: Date };
 
+/** Used when no shifts are set up (Setup lists, Shifts), so the app never depends on that list: Day 06:00-18:00 and
+ *  Night 18:00-06:00. They have no id, so anything saved under them leaves the shift id empty. */
+const DEFAULT_SHIFTS: Row[] = [
+  { id: null, name: "Day", starts: "1970-01-01T06:00:00Z", ends: "1970-01-01T18:00:00Z" },
+  { id: null, name: "Night", starts: "1970-01-01T18:00:00Z", ends: "1970-01-01T06:00:00Z" },
+];
+
 /** The shift running at `at`, with its real start and end. */
 export function shiftWindow(shifts: Row[], at = new Date()): ShiftWindow | null {
   const n = npt(at);
   const tod = n.getUTCHours() * 60 + n.getUTCMinutes();
-  for (const shift of shifts) {
+  for (const shift of shifts.length ? shifts : DEFAULT_SHIFTS) {
     const s = todMinutes(shift.starts);
     const e = todMinutes(shift.ends);
     const wraps = e <= s;
