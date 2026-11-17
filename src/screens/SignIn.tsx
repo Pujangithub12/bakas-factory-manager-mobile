@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Linking, Pressable, ScrollView, View } from "react-native";
+import { Image, Linking, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text, Field, Btn, Card, Badge, Row, C, F, Icon, IconTile, PinPad } from "../ui";
 import { isKnownOnDevice, loadPeople, loadRoles, loadStatus, roleKnownOnDevice, useAuth, type PersonOption, type RoleCount } from "../auth";
@@ -69,9 +69,7 @@ export default function SignIn() {
 
   const Brand = () => (
     <Row style={{ gap: 14, marginBottom: 8 }}>
-      <View style={{ width: 62, height: 62, borderRadius: 16, backgroundColor: C.green, alignItems: "center", justifyContent: "center" }}>
-        <Icon name="stats-chart" size={32} color="#fff" />
-      </View>
+      <Image source={require("../../assets/BakasLogo.jpeg")} style={{ width: 62, height: 62, borderRadius: 16 }} resizeMode="contain" />
       <View>
         <Text style={{ fontFamily: F.head, fontSize: 34, color: C.ink, lineHeight: 38 }}>BAKAS FACTORY</Text>
         <Text style={{ color: C.sub, fontSize: 14 }}>Bakas Renewable Energy · Sarlahi</Text>
