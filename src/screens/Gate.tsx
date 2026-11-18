@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { Screen, H, Sub, Text, Btn, Field, Chips, SectionTitle, Icon, ScreenHeader, Search, C, F, say, useAction, initialsOf, Card, Badge, Row, Spacer, Empty } from "../ui";
 import { useAuth } from "../auth";
 import { newId, save, useData } from "../store";
-import { busyPeople, machineOf, onSiteMap, rolesOf } from "../rules";
+import { GATE_DELAY_MIN, autoOutAt, busyPeople, gateState, machineOf, onSiteMap, pendingMap, rolesOf } from "../rules";
 import { fmtTime, gateShift, nowIso, productionDayStart, shiftWindow, type Row as R } from "../time";
 import { ROLE_LIST, grantableRoles, roleInfo } from "../roles";
 
@@ -29,7 +29,16 @@ export default function Gate() {
   const { busy: saving, run } = useAction();
   const inTab = route.name === "GateHome";
 
-  const site = useMemo(() => onSiteMap(D), [D.attendance]);
+  // Ticks every second so a person waiting to be checked in counts down, and moves to "In" by itself.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const i = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(i);
+  }, []);
+
+  const site = useMemo(() => onSiteMap(D, now), [D.attendance, now]);
+  // Checked in by the guard less than 2 minutes ago: not counted as on site yet.
+  const pending = useMemo(() => pendingMap(D, now), [D.attendance, now]);
   const running = useMemo(() => busyPeople(D), [D.machine_run, D.run_helper]);
   // Drivers still working a vehicle: they cannot be checked out either.
   const driving = useMemo(() => {
@@ -39,6 +48,12 @@ export default function Gate() {
   }, [D.vehicle_session]);
   const vehicleName = (id: string) => D.vehicle.find((v) => v.id === id)?.name ?? "a vehicle";
   const dayStart = productionDayStart().getTime();
+
+  // Minutes and seconds left before a pending check-in counts
+  const left = (a: R) => {
+    const s = Math.max(0, Math.ceil((new Date(a.gate_in).getTime() + GATE_DELAY_MIN * 60_000 - now) / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
 
   // Latest gate record of each person
   const last = useMemo(() => {
@@ -70,7 +85,7 @@ export default function Gate() {
 
   const checkIn = (ids: string[]) =>
     run(async () => {
-      const writes = ids.filter((id) => !site.has(id)).map((id) => ({
+      const writes = ids.filter((id) => !site.has(id) && !pending.has(id)).map((id) => ({
         table: "attendance",
         row: { id: newId(), person_id: id, ...gateShift(D.shift), gate_in: nowIso(), gate_out: null, gate_by: me, on_duty_at: null, on_duty_by: null },
       }));
@@ -85,7 +100,8 @@ export default function Gate() {
       const done: string[] = [];
       const writes = [];
       for (const id of ids) {
-        const a = site.get(id);
+        // A person still waiting to be checked in can be taken out too (the guard tapped In by mistake).
+        const a = site.get(id) ?? pending.get(id);
         if (!a) continue;
         const r = running.get(id);
         if (r) {
@@ -144,8 +160,8 @@ export default function Gate() {
           <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
             <Text style={{ color: C.sub, fontWeight: "600" }}>{sel.length} selected</Text>
             <Spacer />
-            <Btn small title={`Check in (${sel.filter((id) => !site.has(id)).length})`} onPress={() => checkIn(sel)} disabled={!sel.some((id) => !site.has(id))} busy={saving} />
-            <Btn small kind="ghost" title={`Check out (${sel.filter((id) => site.has(id)).length})`} onPress={() => checkOut(sel)} disabled={!sel.some((id) => site.has(id))} busy={saving} />
+            <Btn small title={`Check in (${sel.filter((id) => !site.has(id) && !pending.has(id)).length})`} onPress={() => checkIn(sel)} disabled={!sel.some((id) => !site.has(id) && !pending.has(id))} busy={saving} />
+            <Btn small kind="ghost" title={`Check out (${sel.filter((id) => site.has(id) || pending.has(id)).length})`} onPress={() => checkOut(sel)} disabled={!sel.some((id) => site.has(id) || pending.has(id))} busy={saving} />
             <Btn small kind="ghost" title="Clear" onPress={() => setSel([])} />
           </View>
         ) : null}
@@ -156,15 +172,22 @@ export default function Gate() {
             <SectionTitle>{title}</SectionTitle>
             {people.map((p) => {
               const inside = site.get(p.id);
+              const waiting = pending.get(p.id);
               const prev = last.get(p.id);
+              // 8 hours after the guard checked them in, a person who was never checked out is checked out automatically.
+              const autoOut = prev && gateState(prev, now) === "auto-out" ? prev : undefined;
               const sub = inside
                 ? `In since ${fmtTime(inside.gate_in)}`
-                : prev?.gate_out
-                  ? `Left at ${fmtTime(prev.gate_out)}${new Date(prev.gate_out).getTime() < dayStart ? " (earlier)" : ""}`
-                  : "Not in yet";
+                : waiting
+                  ? `Checking in · ${left(waiting)} left`
+                  : autoOut
+                    ? `Checked out automatically at ${fmtTime(autoOutAt(autoOut).toISOString())}`
+                    : prev?.gate_out
+                      ? `Left at ${fmtTime(prev.gate_out)}${new Date(prev.gate_out).getTime() < dayStart ? " (earlier)" : ""}`
+                      : "Not in yet";
               const checked = sel.includes(p.id);
               return (
-                <View key={p.id} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: inside ? C.okSoft : C.card, borderRadius: 16, borderWidth: 1, borderColor: inside ? C.ok : C.line, padding: 12, paddingRight: 12 }}>
+                <View key={p.id} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: inside ? C.okSoft : waiting ? C.amberSoft : C.card, borderRadius: 16, borderWidth: 1, borderColor: inside ? C.ok : waiting ? C.amber : C.line, padding: 12, paddingRight: 12 }}>
                   <Pressable onPress={() => toggle(p.id)} hitSlop={8} style={{ width: 28, height: 28, borderRadius: 6, borderWidth: 2, borderColor: checked ? C.green : C.grey, backgroundColor: checked ? C.green : "#fff", alignItems: "center", justifyContent: "center" }}>
                     {checked ? <Icon name="checkmark" size={18} color="#fff" /> : null}
                   </Pressable>
@@ -175,9 +198,9 @@ export default function Gate() {
                     </Row>
                     <Text style={{ color: C.sub, fontSize: 14 }}>{sub}{running.get(p.id) ? ` · running ${machineOf(D, running.get(p.id)!.machine_id)?.tag ?? ""}` : ""}{driving.get(p.id) ? ` · working ${vehicleName(driving.get(p.id).vehicle_id)}` : ""}</Text>
                   </View>
-                  {inside ? (
+                  {inside || waiting ? (
                     <Pressable disabled={saving} onPress={() => checkOut([p.id])} style={({ pressed }) => [{ minWidth: 80, height: 48, borderRadius: 12, backgroundColor: "#fff", borderWidth: 1, borderColor: C.line, alignItems: "center", justifyContent: "center" }, pressed && { opacity: 0.7 }]}>
-                      <Text style={{ fontSize: 16, fontWeight: "700", color: C.ink }}>Out</Text>
+                      <Text style={{ fontSize: 16, fontWeight: "700", color: C.ink }}>{waiting ? "Cancel" : "Out"}</Text>
                     </Pressable>
                   ) : (
                     <Pressable disabled={saving} onPress={() => checkIn([p.id])} style={({ pressed }) => [{ minWidth: 80, height: 48, borderRadius: 12, backgroundColor: C.green, alignItems: "center", justifyContent: "center" }, pressed && { opacity: 0.8 }]}>
@@ -213,6 +236,7 @@ export function GateToday() {
         {rows.map((a) => {
           const p = D.person.find((x) => x.id === a.person_id);
           const role = mainRoleOf(D, a.person_id);
+          const state = gateState(a);
           return (
             <Card key={a.id} style={{ flexDirection: "row", alignItems: "center", gap: 12, borderRadius: 16 }}>
               <View style={{ flex: 1, gap: 2 }}>
@@ -222,7 +246,7 @@ export function GateToday() {
                 </Row>
                 <Text style={{ color: C.sub, fontSize: 14 }}>{role ? roleInfo(role).label : "No role"} · gate in {fmtTime(a.gate_in)}{a.on_duty_at ? ` · on duty ${fmtTime(a.on_duty_at)}` : ""}</Text>
               </View>
-              {a.gate_out ? <Badge text={`Out ${fmtTime(a.gate_out)}`} /> : <Badge text="On site" tone="good" />}
+              {a.gate_out ? <Badge text={`Out ${fmtTime(a.gate_out)}`} /> : state === "pending" ? <Badge text="Checking in" tone="warn" /> : state === "auto-out" ? <Badge text={`Auto out ${fmtTime(autoOutAt(a).toISOString())}`} /> : <Badge text="On site" tone="good" />}
             </Card>
           );
         })}
@@ -280,7 +304,7 @@ export function Register() {
   return (
     <Screen>
       <H>Register a new worker</H>
-      <Sub>They are checked in when you save. They show as "New" until the supervisor confirms their details.</Sub>
+      <Sub>They count as checked in {GATE_DELAY_MIN} minutes after you save. They show as "New" until the supervisor confirms their details.</Sub>
       <Field label="NAME AS ON THE ID" value={name} onChangeText={setName} autoCapitalize="words" />
       <Field label="MOBILE (10 DIGITS)" value={mobile} onChangeText={(v) => setMobile(v.replace(/\D/g, ""))} keyboardType="number-pad" maxLength={10} />
       <Field label="ADDRESS" value={address} onChangeText={setAddress} />

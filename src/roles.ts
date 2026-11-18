@@ -12,7 +12,7 @@ export const ROLE_INFO: Record<string, { label: string; blurb: string; icon: Ico
   Operator: { label: "Operator", blurb: "Machines, checks, log sheets", icon: "locate-outline" },
   Driver: { label: "Driver", blurb: "JCB and tractors, diesel", icon: "car-outline" },
   Security: { label: "Security", blurb: "Gate register, new workers", icon: "shield-checkmark-outline" },
-  Fitter: { label: "Fitter", blurb: "Maintenance jobs and the plan", icon: "construct-outline" },
+  Fitter: { label: "Maintenance", blurb: "Maintenance jobs and the plan", icon: "construct-outline" },
   Store: { label: "Store", blurb: "Tools out and back, stock, requests", icon: "cube-outline" },
   Weighbridge: { label: "Weighbridge", blurb: "Trucks in and out, yards, bag count", icon: "speedometer-outline" },
   Helper: { label: "Helper", blurb: "Crews a machine; no app sign-in", icon: "hand-left-outline" },
