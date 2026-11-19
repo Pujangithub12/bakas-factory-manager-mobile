@@ -7,6 +7,7 @@ import { configureSync, startAutoSync, syncNow } from "./sync";
 import { hasRole } from "./rules";
 import { HOUR } from "./time";
 import { SECURE, assertNotLocked, checkPin, hashPin, pinFailed, pinOk } from "./pinvault";
+import { pickMode, modesOf } from "./modes";
 
 export type Session = { person: { id: string; full_name: string }; token: string; roles: string[] };
 // `hash` is a bcrypt hash of the PIN. Older installs stored a salted SHA-256 (with `salt`): still read, and upgraded on the next good PIN.
@@ -81,12 +82,17 @@ export async function isKnownOnDevice(id: string) {
 type Ctx = {
   session: Session | null;
   roles: string[];
-  signIn: (person: PersonOption, pin: string) => Promise<void>;
+  /** `role` is the card the person tapped on the sign-in screen: the role they start out working as. */
+  signIn: (person: PersonOption, pin: string, role?: string) => Promise<void>;
   /** Sign in as a role with a PIN: the person is the one holding that role whose PIN it is. */
   signInRole: (role: string, pin: string) => Promise<void>;
   /** First run: create the one Owner and sign in. */
   setupOwner: (fullName: string, pin: string, email?: string) => Promise<void>;
   signOut: () => Promise<void>;
+  /** The role whose tabs are showing, the roles to choose from, and a way to switch. */
+  activeRole: string;
+  modes: string[];
+  setActiveRole: (role: string) => void;
 };
 const AuthCtx = createContext<Ctx>(null as unknown as Ctx);
 export const useAuth = () => useContext(AuthCtx);
@@ -117,10 +123,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return inCharge && !r.includes("Supervisor") ? [...r, "Supervisor"] : r;
   }, [session, D.person_role, D.shift_in_charge]);
 
+  // The role this person is working as. Chosen at sign-in, remembered per person on this phone.
+  const [preferred, setPreferred] = useState<string | null>(null);
+  const modes = useMemo(() => modesOf(roles), [roles]);
+  const activeRole = pickMode(roles, preferred);
+
   const rolesRef = useRef(roles);
   rolesRef.current = roles;
   const sessionRef = useRef(session);
   sessionRef.current = session;
+
+  const setActiveRole = useCallback((role: string) => {
+    setPreferred(role);
+    const id = sessionRef.current?.person.id;
+    if (id) kvSet(`active_role_${id}`, role).catch(() => {});
+  }, []);
 
   useEffect(() => {
     configureSync(() => {
@@ -132,9 +149,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [session?.person.id]);
 
   type Login = { token: string; person: Session["person"]; roles: string[] };
+  /** Start out working as the role that was tapped at sign-in, or as the one used last on this phone. */
+  const choose = useCallback(async (id: string, role?: string) => {
+    if (role) {
+      setPreferred(role);
+      await kvSet(`active_role_${id}`, role).catch(() => {});
+    } else {
+      setPreferred((await kvGet(`active_role_${id}`).catch(() => null)) || null);
+    }
+  }, []);
   /** Remember this sign-in (so the same person can sign in offline here later) and open the session. */
-  const startSession = useCallback(async (r: Login, pin: string) => {
+  const startSession = useCallback(async (r: Login, pin: string, role?: string) => {
     await kvSet("current_person", r.person.id);
+    await choose(r.person.id, role);
     setSession({ person: r.person, token: r.token, roles: r.roles });
     // The server has already checked the PIN. Keep a hash of it and the token in secure storage for signing in with no signal.
     // This waits a moment so the first screens draw first. If it fails, offline sign-in just waits for the next online one.
@@ -144,17 +171,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await kvSet("known_index", JSON.stringify([...index, { id: r.person.id, name: r.person.full_name, roles: r.roles }]));
       await pinOk(`p_${r.person.id}`);
     })().catch(() => {}), 1500);
-  }, []);
+  }, [choose]);
 
   const setupOwner = useCallback(async (fullName: string, pin: string, email?: string) => {
     const r = await api<Login>("/auth/setup", { body: { full_name: fullName, pin, ...(email ? { email } : {}) } });
-    await startSession(r, pin);
+    await startSession(r, pin, "Owner");
   }, [startSession]);
 
   const signInRole = useCallback(async (role: string, pin: string) => {
     try {
       const r = await api<Login>("/auth/login", { body: { role, pin } });
-      await startSession(r, pin);
+      await startSession(r, pin, role);
       return;
     } catch (e) {
       if (!(e instanceof OfflineError)) throw e;
@@ -168,6 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (known && (await pinMatches(c.id, known, pin))) {
         await pinOk(`r_${role}`);
         await kvSet("current_person", c.id);
+        await choose(c.id, role);
         setSession({ person: { id: c.id, full_name: known.name }, token: known.token, roles: known.roles });
         return;
       }
@@ -176,12 +204,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     throw new Error("Wrong PIN");
   }, [startSession]);
 
-  const signIn = useCallback(async (person: PersonOption, pin: string) => {
+  const signIn = useCallback(async (person: PersonOption, pin: string, role?: string) => {
     const known = await readKnown(person.id);
     let s: Session;
     try {
       const r = await api<Login>("/auth/login", { body: { person_id: person.id, pin } });
-      await startSession(r, pin);
+      await startSession(r, pin, role);
       return;
     } catch (e) {
       if (!(e instanceof OfflineError)) throw e;
@@ -196,16 +224,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       s ={ person: { id: person.id, full_name: known.name }, token: known.token, roles: known.roles };
     }
     await kvSet("current_person", person.id);
+    await choose(person.id, role);
     setSession(s);
   }, [startSession]);
 
   const signOut = useCallback(async () => {
     await kvSet("current_person", "");
+    setPreferred(null);
     setSession(null);
   }, []);
 
   if (!ready) return null;
-  return <AuthCtx.Provider value={{ session, roles, signIn, signInRole, setupOwner, signOut }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ session, roles, signIn, signInRole, setupOwner, signOut, activeRole, modes, setActiveRole }}>{children}</AuthCtx.Provider>;
 }
 
 export { syncNow };

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { Screen, Sub, Card, T, Text, Badge, Row, Btn, C, F, SectionTitle, say, confirm, ScreenHeader, IconTile, Avatar, initialsOf, Icon, type IconName } from "../ui";
+import { Screen, Sub, Card, T, Text, Badge, Row, Btn, Chips, C, F, SectionTitle, say, confirm, ScreenHeader, IconTile, Avatar, initialsOf, Icon, type IconName } from "../ui";
 import { useAuth } from "../auth";
 import { clearRejected, pendingOps, rejectedList, useData, useOutboxCounts, type Rejected } from "../store";
 import { syncNow, useSyncState } from "../sync";
@@ -92,7 +92,7 @@ function useSafeSignOut() {
 /** The "Me" tab. */
 export function Me() {
   const nav = useNavigation<any>();
-  const { session, roles } = useAuth();
+  const { session, roles, activeRole, modes, setActiveRole } = useAuth();
   const sync = useSyncState();
   const counts = useOutboxCounts();
   const signOutSafely = useSafeSignOut();
@@ -110,6 +110,7 @@ export function Me() {
     : undefined;
   const onSite = onSiteMap(D).has(me);
   const inCharge = w ? D.shift_in_charge.find((s) => new Date(s.shift_start).getTime() === w.start.getTime()) : undefined;
+  const askSupervisor = inCharge?.person_id === me && modes.includes("Supervisor") && activeRole !== "Supervisor";
   // An operator who is also Security, Store, Fitter, Weighbridge or Supervisor finds those screens here.
   const allTiles = useTiles();
   const otherScreens = roles.includes("Operator") && !roles.includes("Owner") && !roles.includes("Manager") ? allTiles.filter((t) => !["MyMachines", "ReportProblem"].includes(t.screen)) : [];
@@ -130,6 +131,13 @@ export function Me() {
           <Text style={{ fontFamily: F.head, fontSize: 32, color: C.ink }}>{name}</Text>
           <Sub>{roles.map((r) => roleInfo(r).label).join(", ")}{mobile ? ` · ${mobile}` : ""}</Sub>
         </Card>
+        {modes.length > 1 ? (
+          <Card>
+            <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink }}>Working as</Text>
+            <Chips options={modes.map((r) => ({ key: r, label: roleInfo(r).label }))} value={activeRole} onChange={(r) => r && setActiveRole(r)} />
+            <Sub>{askSupervisor ? "You are in charge this shift. Pick Supervisor for the crew and floor screens." : "Your tabs change to the screens for the role you pick."}</Sub>
+          </Card>
+        ) : null}
         <Card>
           <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink }}>This shift</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 4 }}>

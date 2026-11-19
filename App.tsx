@@ -50,32 +50,22 @@ const TAB_ICONS: Record<string, IconName> = {
  * Operators get their machine and log sheet; everyone else gets the screens for their roles.
  */
 function Tabs() {
-  const { roles } = useAuth();
+  const { activeRole } = useAuth();
   const insets = useSafeAreaInsets();
   const D = useData();
   // A phone screen or tab the Owner or a Manager has switched off (Phone app on the laptop) does not appear.
   const on = (key: string) => !D.phone_screen.some((r) => r.screen === key && r.is_on === false);
-  const isOperator = roles.includes("Operator");
-  const isAdmin = roles.includes("Owner") || roles.includes("Manager");
-  // An operator who also has other roles (Security, Weighbridge, Store, Fitter, Supervisor) finds those screens on the Me tab.
-  // A security guard (and nothing else) gets Gate, Today and Me, like the design.
-  const securityOnly = roles.includes("Security") && !isAdmin && !isOperator && !roles.includes("Supervisor");
-  // A supervisor (not also an operator or admin) gets Crew, Floor and Me. The badges show what needs doing.
-  const supervisorOnly = roles.includes("Supervisor") && !isAdmin && !isOperator && !securityOnly;
-  // A weighbridge clerk (and nothing else) gets Trucks, Yards and Me.
-  const weighbridgeOnly = roles.includes("Weighbridge") && !isAdmin && !isOperator && !securityOnly && !roles.includes("Supervisor");
-  // A driver (and nothing else) gets Vehicle, History and Me.
-  const driverOnly = roles.includes("Driver") && !isAdmin && !isOperator && !securityOnly && !supervisorOnly && !roles.some((r) => ["Fitter", "Store", "Weighbridge"].includes(r));
-  // A fitter or the store keeper (and nothing else) gets their own tabs, like the design.
-  const others = (...r: string[]) => !roles.some((x) => r.includes(x));
-  const fitterOnly = roles.includes("Fitter") && !isAdmin && !isOperator && !securityOnly && !supervisorOnly && others("Store", "Weighbridge", "Driver");
-  const storeOnly = roles.includes("Store") && !isAdmin && !isOperator && !securityOnly && !supervisorOnly && others("Fitter", "Weighbridge", "Driver");
+  // The tabs are those of the role this person is working as: picked on the sign-in screen, switched on the Me tab.
+  const mode = activeRole;
+  const isOperator = mode === "Operator";
   const shift = shiftWindow(D.shift);
   const notOnDuty = new Set(D.attendance.filter((a) => shift && new Date(a.shift_start).getTime() === shift.start.getTime() && !a.on_duty_at && !a.gate_out).map((a) => a.person_id)).size;
   const crewBadge = D.person.filter((p) => p.active && !p.checked).length + notOnDuty;
-  const floorBadge = supervisorOnly ? D.machine.reduce((n, m) => n + machineAlerts(D, m).length, 0) : 0;
+  const floorBadge = mode === "Supervisor" ? D.machine.reduce((n, m) => n + machineAlerts(D, m).length, 0) : 0;
   return (
+    // The key restarts the tab bar on the first tab of the new role when someone switches roles.
     <Tab.Navigator
+      key={mode}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: C.green,
@@ -89,42 +79,42 @@ function Tabs() {
         ),
       })}
     >
-      {isAdmin ? (
+      {mode === "Owner" || mode === "Manager" ? (
         <>
           <Tab.Screen name="Overview" component={Overview} />
           {on("owner.mach") ? <Tab.Screen name="Machines" component={OwnerMachines} /> : null}
           {on("owner.ppl") ? <Tab.Screen name="People" component={OwnerPeople} /> : null}
-          {roles.includes("Owner") && on("owner.money") ? <Tab.Screen name="Money" component={Money} /> : null}
+          {mode === "Owner" && on("owner.money") ? <Tab.Screen name="Money" component={Money} /> : null}
         </>
-      ) : securityOnly ? (
+      ) : mode === "Security" ? (
         <>
           <Tab.Screen name="GateHome" component={Gate} options={{ title: "Gate" }} />
           {on("security.today") ? <Tab.Screen name="GateToday" component={GateToday} options={{ title: "Today" }} /> : null}
           {on("security.vis") ? <Tab.Screen name="Visitors" component={Visitors} /> : null}
         </>
-      ) : fitterOnly ? (
+      ) : mode === "Fitter" ? (
         <>
           <Tab.Screen name="FitterJobs" component={FitterJobs} options={{ title: "Jobs" }} />
           {on("fitter.plan") ? <Tab.Screen name="FitterPlan" component={FitterPlan} options={{ title: "Plan" }} /> : null}
           {on("fitter.done") ? <Tab.Screen name="FitterDone" component={FitterDone} options={{ title: "Done" }} /> : null}
         </>
-      ) : storeOnly ? (
+      ) : mode === "Store" ? (
         <>
           <Tab.Screen name="StoreHome" component={StoreHome} options={{ title: "Tools" }} />
           {on("store.stock") ? <Tab.Screen name="StoreStock" component={StoreStock} options={{ title: "Stock" }} /> : null}
           {on("store.req") ? <Tab.Screen name="StoreRequests" component={StoreRequests} options={{ title: "Requests" }} /> : null}
         </>
-      ) : weighbridgeOnly ? (
+      ) : mode === "Weighbridge" ? (
         <>
           <Tab.Screen name="Trucks" component={Trucks} />
           <Tab.Screen name="YardsTab" component={YardsTab} options={{ title: "Yards" }} />
         </>
-      ) : supervisorOnly ? (
+      ) : mode === "Supervisor" ? (
         <>
           <Tab.Screen name="CrewHome" component={Crew} options={{ title: "Crew", tabBarBadge: crewBadge || undefined }} />
           {on("supervisor.floor") ? <Tab.Screen name="FloorHome" component={Floor} options={{ title: "Floor", tabBarBadge: floorBadge || undefined }} /> : null}
         </>
-      ) : driverOnly ? (
+      ) : mode === "Driver" ? (
         <>
           <Tab.Screen name="DriverVehicle" component={DriverVehicle} options={{ title: "Vehicle" }} />
           {on("driver.hist") ? <Tab.Screen name="DriverHistory" component={DriverHistory} options={{ title: "History" }} /> : null}

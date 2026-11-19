@@ -95,7 +95,7 @@ export default function SignIn() {
         label={person.full_name}
         offline={offline}
         onBack={() => { setPerson(null); setMode("people"); }}
-        onPin={(pin) => signIn(person, pin).then(() => undefined)}
+        onPin={(pin) => signIn(person, pin, pick).then(() => undefined)}
       />
     );
   }
