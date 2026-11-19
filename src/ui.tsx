@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text as RNText, TextInput, View, type KeyboardTypeOptions, type TextProps, type ViewStyle } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 // Brand: warm brown on a soft grey page. Green is kept only for "good" status.
@@ -147,7 +147,7 @@ export const Search = ({ value, onChangeText, placeholder = "Search" }: { value:
 export type Option = { key: string; label: string; sub?: string };
 
 /** Tap to choose one (or several). */
-export function Chips({ options, value, onChange, multi }: { options: Option[]; value: string | string[] | null; onChange: (v: any) => void; multi?: boolean }) {
+export function Chips({ options, value, onChange, multi, boxes }: { options: Option[]; value: string | string[] | null; onChange: (v: any) => void; multi?: boolean; boxes?: boolean }) {
   const sel = (k: string) => (multi ? (value as string[]).includes(k) : value === k);
   const toggle = (k: string) => {
     if (!multi) return onChange(k === value ? null : k);
@@ -157,9 +157,16 @@ export function Chips({ options, value, onChange, multi }: { options: Option[]; 
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
       {options.map((o) => (
-        <Pressable key={o.key} onPress={() => toggle(o.key)} style={[s.chip, sel(o.key) && { backgroundColor: C.green, borderColor: C.green }]}>
-          <Text style={{ color: sel(o.key) ? "#fff" : C.ink, fontWeight: "600", fontSize: 14 }}>{o.label}</Text>
-          {o.sub ? <Text style={{ color: sel(o.key) ? "#f2e6d8" : C.sub, fontSize: 11 }}>{o.sub}</Text> : null}
+        <Pressable
+          key={o.key}
+          onPress={() => toggle(o.key)}
+          style={[s.chip, boxes && { flexDirection: "row", alignItems: "center", gap: 8 }, sel(o.key) && (boxes ? { backgroundColor: C.greenSoft, borderColor: C.green } : { backgroundColor: C.green, borderColor: C.green })]}
+        >
+          {boxes ? <View style={[s.box, { width: 20, height: 20, borderRadius: 4 }, sel(o.key) && { backgroundColor: C.green, borderColor: C.green }]}>{sel(o.key) ? <Text style={{ color: "#fff", fontWeight: "800", fontSize: 12, lineHeight: 15 }}>✓</Text> : null}</View> : null}
+          <View>
+            <Text style={{ color: sel(o.key) && !boxes ? "#fff" : C.ink, fontWeight: "600", fontSize: 14 }}>{o.label}</Text>
+            {o.sub ? <Text style={{ color: sel(o.key) && !boxes ? "#f2e6d8" : C.sub, fontSize: 11 }}>{o.sub}</Text> : null}
+          </View>
         </Pressable>
       ))}
     </View>
@@ -205,6 +212,33 @@ export function Check({ label, value, onChange }: { label: string; value: boolea
       <View style={[s.box, value && { backgroundColor: C.green, borderColor: C.green }]}>{value ? <Text style={{ color: "#fff", fontWeight: "800" }}>✓</Text> : null}</View>
       <Text style={{ color: C.ink, fontSize: 15, flex: 1 }}>{label}</Text>
     </Pressable>
+  );
+}
+
+/** A form that slides up from the bottom: a drag handle, the title with Close at the right, the form, and an optional bar of
+ *  buttons that stays pinned below it while the form scrolls. Mount it again (new key) each time it opens to start with a clean form. */
+export function Sheet({ visible, title, subtitle, onClose, footer, children }: { visible: boolean; title: string; subtitle?: string; onClose: () => void; footer?: React.ReactNode; children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: "flex-end" }}>
+        <Pressable onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.35)" }} />
+        <View style={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: "90%", overflow: "hidden" }}>
+          <View style={{ paddingHorizontal: 20, paddingTop: 10 }}>
+            <View style={{ alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: C.line, marginBottom: 14 }} />
+            <Row style={{ marginBottom: 6 }}>
+              <Text style={{ flex: 1, fontFamily: F.head, fontSize: 30, lineHeight: 34, color: C.ink }}>{title}</Text>
+              <Pressable onPress={onClose} hitSlop={12}><Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.sub }}>Close</Text></Pressable>
+            </Row>
+            {subtitle ? <Text style={{ color: C.sub, fontSize: 15, marginBottom: 6 }}>{subtitle}</Text> : null}
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingHorizontal: 20, paddingTop: 4, paddingBottom: footer ? 16 : 18 + insets.bottom }}>{children}</ScrollView>
+          {footer ? (
+            <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12 + insets.bottom, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.line }}>{footer}</View>
+          ) : null}
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Chips, YesNo, Check, say, useAction, Empty, C, F, Spacer, ScreenHeader, Pill, Tile, StatusDot, initialsOf, Icon } from "../ui";
+import { Screen, H, Sub, Card, T, Text, Badge, Row, Btn, Field, SectionTitle, Chips, YesNo, Check, Sheet, say, useAction, Empty, C, F, Spacer, ScreenHeader, Pill, Tile, StatusDot, initialsOf, Icon } from "../ui";
 import { useAuth } from "../auth";
 import { newId, save, useData, type Data } from "../store";
 import {
@@ -101,6 +101,8 @@ export function MachineBody({ machineId }: { machineId: string }) {
   const m = D.machine.find((x) => x.id === machineId);
   const site = useMemo(() => onSiteMap(D), [D.attendance]);
   const [panel, setPanel] = useState<Panel>(null);
+  // Counts up each time the Start sheet opens, so it comes up with a fresh form (time, helpers).
+  const [startKey, setStartKey] = useState(0);
   const { busy, run } = useAction();
   const state = m ? machineStatus(D, m).state : "idle";
   useEffect(() => setPanel(null), [machineId, state]);
@@ -221,7 +223,7 @@ export function MachineBody({ machineId }: { machineId: string }) {
 
         {!st.run ? (
           <View style={{ marginTop: 8, gap: 6 }}>
-            <Btn title={panel === "start" ? "Close" : "Start machine"} kind={panel === "start" ? "ghost" : "primary"} disabled={!allowed || !!blocking || !here} onPress={() => setPanel(panel === "start" ? null : "start")} />
+            <Btn title="Start machine" disabled={!allowed || !!blocking || !here} onPress={() => { setStartKey((k) => k + 1); setPanel("start"); }} />
             {!allowed ? <Sub>You may not run this machine. Ask the supervisor to tick it for you.</Sub> : blocking ? <Sub style={{ color: C.red }}>Maintenance must mark it fixed first.</Sub> : null}
           </View>
         ) : mine ? (
@@ -229,7 +231,7 @@ export function MachineBody({ machineId }: { machineId: string }) {
         ) : null}
       </View>
 
-      {panel === "start" && !st.run ? <StartForm D={D} m={m} me={me} onDone={() => setPanel(null)} /> : null}
+      <StartForm key={startKey} visible={panel === "start" && !st.run} D={D} m={m} me={me} onDone={() => setPanel(null)} />
       {panel === "stop" && st.run && mine ? <StopForm D={D} m={m} me={me} run={st.run} onDone={() => setPanel(null)} /> : null}
       {panel === "reading" && st.run && mine ? <ReadingEditor D={D} m={m} me={me} runId={st.run.id} onDone={() => setPanel(null)} /> : null}
 
@@ -321,11 +323,12 @@ function ProdStat({ label, value, sub }: { label: string; value: string; sub?: s
   );
 }
 
-function TimeField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return <Field label={label} value={value} onChangeText={(v) => onChange(v.replace(/[^\d:.]/g, ""))} keyboardType="numbers-and-punctuation" hint="24-hour time, Nepal, like 14:30" />;
+function TimeField({ label, value, onChange, hint }: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {
+  return <Field label={label} value={value} onChangeText={(v) => onChange(v.replace(/[^\d:.]/g, ""))} keyboardType="numbers-and-punctuation" hint={hint ?? "24-hour time, Nepal, like 14:30"} />;
 }
 
-function StartForm({ D, m, me, onDone }: { D: Data; m: R; me: string; onDone: () => void }) {
+/** The Start sheet: slides up over the machine screen, with Cancel and Start run pinned at the bottom. */
+function StartForm({ D, m, me, visible, onDone }: { D: Data; m: R; me: string; visible: boolean; onDone: () => void }) {
   const prestart = fieldsFor(D, m.stage, "prestart");
   const [answers, setAnswers] = useState<Record<string, boolean | null>>({});
   // Helpers come with the operator's last run, if they are still free.
@@ -383,11 +386,27 @@ function StartForm({ D, m, me, onDone }: { D: Data; m: R; me: string; onDone: ()
       onDone();
     });
 
+  const startShift = shiftWindow(D.shift, clockToDate(at) ?? new Date());
+
   return (
-    <Card style={{ gap: 10 }}>
-      <T bold style={{ fontSize: 17 }}>Start {m.tag}</T>
-      <TimeField label="Started at" value={at} onChange={setAt} />
-      {openDown ? <Sub>This ends the stop: {downReason ?? "Down"} since {fmtTime(openDown.started_at)}.</Sub> : null}
+    <Sheet
+      visible={visible}
+      title={`Start ${m.tag} · ${m.name}`}
+      subtitle={`Operator: ${personName(D, me)}`}
+      onClose={onDone}
+      footer={
+        <>
+          <View style={{ flex: 1 }}><Btn title="Cancel" kind="ghost" onPress={onDone} /></View>
+          <View style={{ flex: 1 }}><Btn title={bypass ? "Start on bypass" : "Start run"} kind={bypass ? "danger" : "primary"} onPress={start} busy={busy} /></View>
+        </>
+      }
+    >
+      <TimeField label="Started at" value={at} onChange={setAt} hint={startShift ? `${startShift.shift.name} shift` : undefined} />
+      {openDown ? (
+        <View style={{ backgroundColor: C.greySoft, borderRadius: 12, padding: 14 }}>
+          <Text style={{ color: C.ink, fontSize: 15 }}>This ends the stop: {downReason ?? "Down"} since {fmtTime(openDown.started_at)}.</Text>
+        </View>
+      ) : null}
       {prestart.length ? <SectionTitle>Checks before starting</SectionTitle> : null}
       {prestart.map((f) => (
         <Row key={f.id} style={{ justifyContent: "space-between" }}>
@@ -403,10 +422,9 @@ function StartForm({ D, m, me, onDone }: { D: Data; m: R; me: string; onDone: ()
         </View>
       ) : null}
 
-      <SectionTitle>Helpers with you · only people checked in and not on another machine</SectionTitle>
-      {crew.length === 0 ? <Sub>No free helpers are checked in right now.</Sub> : <Chips multi value={helpers} onChange={setHelpers} options={crew.map((p) => ({ key: p.id, label: `${p.full_name}${p.checked ? "" : " (new)"}` }))} />}
-      <Btn title={bypass ? "Start on bypass" : "Start machine"} kind={bypass ? "danger" : "primary"} onPress={start} busy={busy} />
-    </Card>
+      <Text style={{ color: C.sub, fontSize: 14, marginTop: 4 }}><Text style={{ fontWeight: "700", color: C.ink }}>Helpers with you</Text> · only people checked in and not on another machine</Text>
+      {crew.length === 0 ? <Sub>No free helpers are checked in right now.</Sub> : <Chips multi boxes value={helpers} onChange={setHelpers} options={crew.map((p) => ({ key: p.id, label: `${p.full_name}${p.checked ? "" : " (new)"}` }))} />}
+    </Sheet>
   );
 }
 

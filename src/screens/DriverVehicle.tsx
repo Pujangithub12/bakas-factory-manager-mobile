@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, ScrollView, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { Badge, Btn, C, Card, Chips, Empty, F, Field, Icon, Pill, Row, ScreenHeader, SectionTitle, Spacer, Sub, T, Text, initialsOf, useAction } from "../ui";
+import { Badge, Btn, C, Card, Chips, Empty, F, Field, Icon, Pill, Row, ScreenHeader, SectionTitle, Sheet, Spacer, Sub, T, Text, initialsOf, useAction } from "../ui";
 import { useAuth } from "../auth";
 import { requestDays } from "../sync";
 import { newId, save, useData } from "../store";
@@ -205,26 +204,6 @@ export default function DriverVehicle() {
         <FuelPanel key={v.id} v={v} me={me} last={last} onDone={close} />
       </Sheet>
     </View>
-  );
-}
-
-/** A form that slides up from the bottom: a title, Close at the top right, and the form below. */
-function Sheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
-  const insets = useSafeAreaInsets();
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: "flex-end" }}>
-        <Pressable onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.35)" }} />
-        <View style={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18 + insets.bottom, maxHeight: "90%" }}>
-          <View style={{ alignSelf: "center", width: 40, height: 5, borderRadius: 3, backgroundColor: C.line, marginBottom: 14 }} />
-          <Row style={{ marginBottom: 6 }}>
-            <Text style={{ flex: 1, fontFamily: F.head, fontSize: 30, lineHeight: 34, color: C.ink }}>{title}</Text>
-            <Pressable onPress={onClose} hitSlop={12}><Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.sub }}>Close</Text></Pressable>
-          </Row>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingTop: 4 }}>{children}</ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
   );
 }
 
