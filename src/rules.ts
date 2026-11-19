@@ -21,42 +21,31 @@ export const mainRole = (D: Data, personId: string) => {
 
 // ------------------------------------------------------------ gate ----
 
-/** Someone the guard checks in counts as on site only after this many minutes... */
-export const GATE_DELAY_MIN = 2;
-/** ...and is checked out again automatically this many hours after the guard checked them in. */
+/** A person is checked out automatically this many hours after the guard checked them in, if nobody checked them out. */
 export const GATE_AUTO_OUT_HOURS = 8;
+/** A check-in that is checked out again within this many minutes is removed, not saved: the guard tapped In by mistake. */
+export const GATE_CANCEL_MIN = 3;
 
-/** pending: checked in less than 2 minutes ago. in: on site. auto-out: 8 hours have passed with no check-out. out: checked out. */
-export type GateState = "pending" | "in" | "auto-out" | "out";
+/** in: on site. auto-out: 8 hours have passed with no check-out. out: checked out. */
+export type GateState = "in" | "auto-out" | "out";
 
 /** Where one gate record stands right now. */
 export function gateState(a: Row, now = Date.now()): GateState {
   if (a.gate_out) return "out";
-  const t = ms(a.gate_in);
-  if (now >= t + GATE_AUTO_OUT_HOURS * HOUR) return "auto-out";
-  if (now < t + GATE_DELAY_MIN * MIN) return "pending";
-  return "in";
+  return now >= ms(a.gate_in) + GATE_AUTO_OUT_HOURS * HOUR ? "auto-out" : "in";
 }
 
 /** The time a record is checked out automatically (8 hours after check-in). */
 export const autoOutAt = (a: Row) => new Date(ms(a.gate_in) + GATE_AUTO_OUT_HOURS * HOUR);
 
-/** People checked in right now: their open attendance row, from 2 minutes after the guard checked them in until 8 hours later. */
+/** Checking this person out now removes the check-in instead of logging a visit: it is under 3 minutes old and nobody has marked them on duty. */
+export const gateCancelable = (a: Row, now = Date.now()) => !a.gate_out && !a.on_duty_at && now - ms(a.gate_in) < GATE_CANCEL_MIN * MIN;
+
+/** People checked in right now: their open attendance row, from the moment the guard checked them in until 8 hours later. */
 export function onSiteMap(D: Data, now = Date.now()): Map<string, Row> {
   const m = new Map<string, Row>();
   for (const a of D.attendance) {
     if (!a.gate_in || gateState(a, now) !== "in") continue;
-    const cur = m.get(a.person_id);
-    if (!cur || a.gate_in > cur.gate_in) m.set(a.person_id, a);
-  }
-  return m;
-}
-
-/** People the guard has checked in less than 2 minutes ago: they do not count as on site yet. */
-export function pendingMap(D: Data, now = Date.now()): Map<string, Row> {
-  const m = new Map<string, Row>();
-  for (const a of D.attendance) {
-    if (!a.gate_in || gateState(a, now) !== "pending") continue;
     const cur = m.get(a.person_id);
     if (!cur || a.gate_in > cur.gate_in) m.set(a.person_id, a);
   }
