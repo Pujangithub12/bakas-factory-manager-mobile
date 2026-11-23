@@ -35,6 +35,7 @@ import { FitterJobs, FitterPlan, FitterDone, PmDone, DailyRound } from "./src/sc
 import { Visitors, NewVisitor, VisitorPass } from "./src/screens/Visitors";
 import { AlertsScreen, MachineDrill, OwnerMachines, OwnerPeople, PeopleList, PersonDrill, TruckDrill } from "./src/screens/OwnerScreens";
 import Money from "./src/screens/Money";
+import Attendance from "./src/screens/Attendance";
 import PowerReading from "./src/screens/PowerReading";
 import PaymentForm from "./src/screens/PaymentForm";
 
@@ -42,7 +43,7 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 const TAB_ICONS: Record<string, IconName> = {
-  Money: "cash-outline", StoreHome: "cube-outline", StoreStock: "list-outline", StoreRequests: "clipboard-outline", FitterJobs: "construct-outline", FitterPlan: "clipboard-outline", FitterDone: "checkmark-done-outline", Visitors: "people-outline", Trucks: "bus-outline", YardsTab: "layers-outline", CrewHome: "people-outline", FloorHome: "locate-outline", GateHome: "shield-checkmark-outline", GateToday: "list-outline", More: "grid-outline", Work: "locate-outline", Overview: "stats-chart-outline", Machines: "locate-outline", People: "people-outline", LogSheet: "clipboard-outline", Problems: "construct-outline", Details: "information-circle-outline", Me: "person-outline", DriverVehicle: "car-outline", DriverHistory: "list-outline",
+  AttendanceHome: "calendar-outline", Money: "cash-outline", StoreHome: "cube-outline", StoreStock: "list-outline", StoreRequests: "clipboard-outline", FitterJobs: "construct-outline", FitterPlan: "clipboard-outline", FitterDone: "checkmark-done-outline", Visitors: "people-outline", Trucks: "bus-outline", YardsTab: "layers-outline", CrewHome: "people-outline", FloorHome: "locate-outline", GateHome: "shield-checkmark-outline", GateToday: "list-outline", More: "grid-outline", Work: "locate-outline", Overview: "stats-chart-outline", Machines: "locate-outline", People: "people-outline", LogSheet: "clipboard-outline", Problems: "construct-outline", Details: "information-circle-outline", Me: "person-outline", DriverVehicle: "car-outline", DriverHistory: "list-outline",
 };
 
 /**
@@ -113,6 +114,7 @@ function Tabs() {
         <>
           <Tab.Screen name="CrewHome" component={Crew} options={{ title: "Crew", tabBarBadge: crewBadge || undefined }} />
           {on("supervisor.floor") ? <Tab.Screen name="FloorHome" component={Floor} options={{ title: "Floor", tabBarBadge: floorBadge || undefined }} /> : null}
+          <Tab.Screen name="AttendanceHome" component={Attendance} options={{ title: "Attendance" }} />
         </>
       ) : mode === "Driver" ? (
         <>
@@ -151,6 +153,7 @@ function Root() {
         <Stack.Screen name="Gate" component={Gate} options={{ title: "Gate register" }} />
         <Stack.Screen name="Register" component={Register} options={{ title: "New person" }} />
         <Stack.Screen name="Crew" component={Crew} options={{ title: "Shift & crew" }} />
+        <Stack.Screen name="Attendance" component={Attendance} options={{ title: "Attendance" }} />
         <Stack.Screen name="CorrectWorker" component={CorrectWorker} options={{ title: "Correct details" }} />
         <Stack.Screen name="CrewMachines" component={CrewMachines} options={{ title: "Machines" }} />
         <Stack.Screen name="CrewVehicles" component={CrewVehicles} options={{ title: "Vehicles" }} />

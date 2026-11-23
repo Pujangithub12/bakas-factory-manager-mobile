@@ -63,7 +63,7 @@ export default function Money() {
   const rows: [string, number, string][] = [
     ["Raw material", m.rawUse, `${tons(m.rawUseT)} at ${rkg(m.px)} a kg`],
     ["Electricity", m.elec, `${Math.round(m.kwh).toLocaleString("en-US")} kWh`],
-    ["Labour", m.lab, "shifts at the gate x daily wage"],
+    ["Labour", m.lab, "days worked x daily wage"],
     ["Diesel", m.dslC, `${Math.round(m.dsl).toLocaleString("en-US")} L`],
     ["Spares and oil", m.spares, "issued from the store"],
   ];

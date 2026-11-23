@@ -11,9 +11,11 @@ export type SyncState = {
   error: string | null;
   needsSignIn: boolean;
   challan: { last: number | null; prefix: string | null };
+  /** How many days of history the last fetch brought. */
+  loadedDays: number;
 };
 
-let state: SyncState = { syncing: false, online: true, lastOk: null, error: null, needsSignIn: false, challan: { last: null, prefix: null } };
+let state: SyncState = { syncing: false, online: true, lastOk: null, error: null, needsSignIn: false, challan: { last: null, prefix: null }, loadedDays: 0 };
 const subs = new Set<() => void>();
 const set = (patch: Partial<SyncState>) => { state = { ...state, ...patch }; subs.forEach((f) => f()); };
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
@@ -60,12 +62,13 @@ export async function syncNow(): Promise<void> {
       ops.forEach((o, i) => (res.results[i]?.ok ? done.push(o) : rejected.push({ op: o, error: res.results[i]?.error ?? "Rejected" })));
       await finishOps(done, rejected);
     }
-    const pull = await api<{ tables: Record<string, Row[]>; challan: SyncState["challan"] }>(`/sync/pull?days=${Math.max(session.days, extraDays)}`, { token: session.token });
+    const asked = Math.max(session.days, extraDays);
+    const pull = await api<{ tables: Record<string, Row[]>; challan: SyncState["challan"] }>(`/sync/pull?days=${asked}`, { token: session.token });
     await applyPull(pull.tables);
     const at = new Date().toISOString();
     await kvSet("last_sync", at);
     await kvSet("challan", JSON.stringify(pull.challan));
-    set({ lastOk: at, error: null, needsSignIn: false, challan: pull.challan });
+    set({ lastOk: at, error: null, needsSignIn: false, challan: pull.challan, loadedDays: asked });
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) set({ needsSignIn: true, error: "Sign in again to send your entries" });
     else if (e instanceof OfflineError) set({ error: "No connection. Entries are saved on this phone." });

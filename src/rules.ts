@@ -1,6 +1,6 @@
 // Phase 1 rules, worked out from the local tables. Pure functions: no screens, no storage.
 import type { Data } from "./store";
-import { fiscalYearStart, MIN, HOUR, DAY, type Row } from "./time";
+import { dayKey, fiscalYearStart, shiftWindow, weekdayOf, MIN, HOUR, DAY, type Row } from "./time";
 
 export const num = (v: any): number => (v == null || v === "" ? 0 : Number(v));
 const ms = (v: any) => new Date(v).getTime();
@@ -62,6 +62,96 @@ export function busyPeople(D: Data): Map<string, Row> {
     for (const h of D.run_helper) if (h.run_id === r.id) m.set(h.person_id, r);
   }
   return m;
+}
+
+// ---------------------------------------------------- attendance sheet ----
+
+export const MARK_STATUSES = ["Present", "Half day", "Absent", "Leave", "Off"] as const;
+export type MarkStatus = (typeof MARK_STATUSES)[number];
+/** The weekly day off: Saturday. Someone who comes in anyway is Present. */
+export const WEEKLY_OFF = 6;
+
+/** How many days back this person may mark: the Owner any day, a Manager 7, a Supervisor the previous day. The server checks this too. */
+export function markBackDays(roles: string[]) {
+  if (roles.includes("Owner")) return Infinity;
+  if (roles.includes("Manager")) return 7;
+  if (roles.includes("Supervisor")) return 1;
+  return -1;
+}
+export function canMarkDay(roles: string[], day: string, today = dayKey()) {
+  const ago = Math.round((Date.parse(today) - Date.parse(day)) / DAY);
+  return ago >= 0 && ago <= markBackDays(roles);
+}
+
+export type AttendanceIndex = { gates: Map<string, Row[]>; marks: Map<string, Row>; first: string | null };
+const dayId = (personId: string, day: string) => `${personId}|${day}`;
+
+/** Gate records and marks by person and production day. `first` is the earliest day the sheet has anything for. */
+export function attendanceIndex(D: Data): AttendanceIndex {
+  const gates = new Map<string, Row[]>();
+  const marks = new Map<string, Row>();
+  let first: string | null = null;
+  const seen = (d: string) => { if (!first || d < first) first = d; };
+  for (const a of D.attendance) {
+    if (!a.gate_in) continue;
+    const d = dayKey(a.shift_start);
+    seen(d);
+    const k = dayId(a.person_id, d);
+    gates.set(k, [...(gates.get(k) ?? []), a].sort(byTime("gate_in")));
+  }
+  for (const m of D.attendance_mark ?? []) {
+    const d = String(m.day).slice(0, 10);
+    seen(d);
+    marks.set(dayId(m.person_id, d), m);
+  }
+  return { gates, marks, first };
+}
+
+export type DayEntry = {
+  /** "Not in": today, and nothing recorded yet. null: nothing to show (a future day, or before this person started). */
+  status: MarkStatus | "Not in" | null;
+  source: "mark" | "gate" | "auto";
+  mark?: Row;
+  /** First and last gate record of the day. */
+  gate?: Row;
+  lastGate?: Row;
+  /** The 8-hour auto-out closed it: nobody recorded when they left. */
+  noCheckout: boolean;
+};
+
+/** One person on one day. A mark wins, then the gate, then Saturday is Off and any other finished day is Absent. */
+export function dayEntry(ix: AttendanceIndex, p: Row, day: string, now = Date.now()): DayEntry {
+  const k = dayId(p.id, day);
+  const mark = ix.marks.get(k);
+  const list = ix.gates.get(k) ?? [];
+  const gate = list[0];
+  const lastGate = list[list.length - 1];
+  const noCheckout = !!lastGate && gateState(lastGate, now) === "auto-out";
+  const base = { mark, gate, lastGate, noCheckout };
+  if (mark) return { ...base, status: mark.status, source: "mark" };
+  if (gate) return { ...base, status: "Present", source: "gate" };
+  const today = dayKey(now);
+  const joined = p.registered_at ? dayKey(p.registered_at) : null;
+  const start = joined && ix.first && joined > ix.first ? joined : ix.first;
+  if (day > today || !p.active || !start || day < start) return { ...base, status: null, source: "auto" };
+  if (weekdayOf(day) === WEEKLY_OFF) return { ...base, status: "Off", source: "auto" };
+  return { ...base, status: day === today ? "Not in" : "Absent", source: "auto" };
+}
+
+/** Who is on the sheet: everyone active but the Owner, plus anyone since made inactive who has a record on these days. */
+export function attendancePeople(D: Data, ix: AttendanceIndex, days: string[]) {
+  return D.person
+    .filter((p) => !rolesOf(D, p.id).includes("Owner") && (p.active || days.some((d) => ix.gates.has(dayId(p.id, d)) || ix.marks.has(dayId(p.id, d)))))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+}
+
+/** How much of a day's work this counts as. */
+export const dayShare = (status: string | null | undefined) => (status === "Present" ? 1 : status === "Half day" ? 0.5 : 0);
+
+/** The letter on the monthly sheet: the shift for someone present, otherwise the status. */
+export function dayCode(D: Data, e: DayEntry): string {
+  if (e.status === "Present") return e.gate ? (shiftWindow(D.shift, new Date(e.gate.shift_start))?.shift.name?.[0]?.toUpperCase() ?? "P") : "P";
+  return e.status === "Half day" ? "H" : e.status === "Absent" ? "A" : e.status === "Leave" ? "L" : e.status === "Off" ? "Off" : "";
 }
 
 // ----------------------------------------------------------- machines ----

@@ -101,6 +101,19 @@ export function productionDayStart(at = new Date()): Date {
   return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() - back, 6, 0) - NPT_MS);
 }
 
+/** The production day a moment belongs to, as 2026-11-23. It runs 06:00 to 06:00 Nepal time, so a night shift is one day. */
+export const dayKey = (at: any = new Date()) => new Date(new Date(at).getTime() + NPT_MS - 6 * HOUR).toISOString().slice(0, 10);
+/** The moment a production day starts. */
+export const dayKeyStart = (k: string) => new Date(Date.parse(`${k}T06:00:00Z`) - NPT_MS);
+export const addDays = (k: string, n: number) => new Date(Date.parse(`${k}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+/** 0 is Sunday, 6 is Saturday. */
+export const weekdayOf = (k: string) => new Date(`${k}T00:00:00Z`).getUTCDay();
+/** Mon 23 Nov */
+export const fmtDayKey = (k: string) => {
+  const d = new Date(`${k}T00:00:00Z`);
+  return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+};
+
 export type PeriodKey = "today" | "yesterday" | "7d" | "30d";
 export const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: "today", label: "Today" },

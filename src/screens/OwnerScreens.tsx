@@ -300,6 +300,7 @@ export function OwnerPeople() {
         <Card style={{ padding: 16, borderRadius: 18, gap: 8 }}>
           <Row><Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink, flex: 1 }}>Attendance</Text><Btn small kind="ghost" title="Everyone" onPress={() => nav.navigate("PeopleList", {})} /></Row>
           <Sub>From the gate register (security) and on-duty marks (supervisor).</Sub>
+          <Btn small kind="soft" title="Open attendance sheet" onPress={() => nav.navigate("Attendance")} />
           <Row>{fig("On site now", site)}{fig("Came in", came.length)}{fig("New, to check", fresh, fresh > 0)}</Row>
           <Text style={{ fontFamily: F.head, fontSize: 20, color: C.ink, marginTop: 4 }}>By role</Text>
           {roles.length === 0 ? <Sub>Nobody came in during this period.</Sub> : roles.map(([r, n]) => (

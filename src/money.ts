@@ -1,8 +1,8 @@
 // Phase 3: rupees. Pure functions over the local tables, for the Owner (and a Manager's own entries).
 // Written once here, copied to the laptop by web/scripts/copy-shared.cjs.
 import type { Data } from "./store";
-import { briquetteKg, num, pelletKg, ticketNet, trucksIn, trucksOut, mainRole } from "./rules";
-import { DAY, HOUR, type Row } from "./time";
+import { attendanceIndex, briquetteKg, dayShare, num, pelletKg, ticketNet, trucksIn, trucksOut, mainRole } from "./rules";
+import { DAY, HOUR, dayKeyStart, type Row } from "./time";
 
 const ms = (v: any) => new Date(v).getTime();
 const sum = <T,>(list: T[], f: (x: T) => number) => list.reduce((n, x) => n + f(x), 0);
@@ -125,12 +125,15 @@ export const runHours = (D: Data, machineId: string, a: number, b: number) =>
   sum(D.machine_run.filter((r) => r.machine_id === machineId), (r) => overlap(ms(r.started_at), r.stopped_at ? ms(r.stopped_at) : Date.now(), a, b)) / HOUR;
 
 export function labourIn(D: Data, a: number, b: number) {
+  // One wage per person per day from the attendance sheet, however many times they went through the gate. Half day is half.
+  const ix = attendanceIndex(D);
   let c = 0;
-  for (const x of D.attendance) {
-    const t = ms(x.gate_in);
+  for (const k of new Set([...ix.gates.keys(), ...ix.marks.keys()])) {
+    const [personId, d] = k.split("|");
+    const t = dayKeyStart(d).getTime();
     if (t < a || t >= b) continue;
-    const role = mainRole(D, x.person_id);
-    if (role && role !== "Owner") c += wage(D, role);
+    const role = mainRole(D, personId);
+    if (role && role !== "Owner") c += wage(D, role) * dayShare(ix.marks.get(k)?.status ?? "Present");
   }
   return c;
 }
