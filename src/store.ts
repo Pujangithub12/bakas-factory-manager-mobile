@@ -5,6 +5,7 @@ import * as Crypto from "expo-crypto";
 import { useSyncExternalStore } from "react";
 import meta from "./meta.json";
 import type { Row } from "./time";
+import { planPull } from "./pulldiff";
 
 type Meta = Record<string, { pk: string[]; cols: Record<string, { type: string; opt: boolean }> }>;
 const M = meta as unknown as Meta;
@@ -136,26 +137,37 @@ export async function clearRejected() {
   await persist(async () => { await db.runAsync("DELETE FROM rejected"); await refreshCounts(); });
 }
 
-/** Replace local tables with what the server sent, keeping rows that are still waiting to be sent. */
+/** Bring the local tables in line with what the server sent. Only rows that are new, changed or gone are written, and only
+ *  the tables that changed tell the screens. Rows still waiting to be sent are kept as they are on this phone. */
 export async function applyPull(tables: Record<string, Row[]>) {
   const touched: string[] = [];
-  await persist(async () => {
-    const waiting = await db.getAllAsync<{ t: string; j: string }>("SELECT t, j FROM outbox");
-    const dirty = new Set([...waiting.map((w) => `${w.t}#${keyOf(w.t, JSON.parse(w.j))}`), ...inflight.keys()]);
-    await db.withTransactionAsync(async () => {
+  try {
+    await persist(async () => {
+      const waiting = await db.getAllAsync<{ t: string; j: string }>("SELECT t, j FROM outbox");
+      // From here to the writes nothing waits, so no entry made on this phone can slip in between working out the changes and making them.
+      const dirty = new Set([...waiting.map((w) => `${w.t}#${keyOf(w.t, JSON.parse(w.j))}`), ...inflight.keys()]);
+      const writes: { t: string; put: [string, Row][]; del: string[] }[] = [];
       for (const [t, list] of Object.entries(tables)) {
         if (!M[t]) continue;
-        const next = new Map<string, Row>();
-        for (const r of list) next.set(keyOf(t, r), r);
-        for (const [k, r] of mem.get(t)!) if (dirty.has(`${t}#${k}`)) next.set(k, r);
-        mem.set(t, next);
+        const cur = mem.get(t)!;
+        const { put, del } = planPull(cur, list, (r) => keyOf(t, r), (k) => dirty.has(`${t}#${k}`));
+        if (!put.length && !del.length) continue;
+        for (const [k, r] of put) cur.set(k, r);
+        for (const k of del) cur.delete(k);
+        writes.push({ t, put, del });
         touched.push(t);
-        await db.runAsync("DELETE FROM docs WHERE t = ?", t);
-        for (const [k, r] of next) await db.runAsync("INSERT INTO docs (t, k, j) VALUES (?, ?, ?)", t, k, JSON.stringify(r));
       }
+      if (!writes.length) return;
+      await db.withTransactionAsync(async () => {
+        for (const w of writes) {
+          for (const k of w.del) await db.runAsync("DELETE FROM docs WHERE t = ? AND k = ?", w.t, k);
+          for (const [k, r] of w.put) await db.runAsync("INSERT OR REPLACE INTO docs (t, k, j) VALUES (?, ?, ?)", w.t, k, JSON.stringify(r));
+        }
+      });
     });
-  });
-  touch(touched);
+  } finally {
+    if (touched.length) touch(touched);
+  }
 }
 
 // ---- small key/value (settings, last sync) ----
