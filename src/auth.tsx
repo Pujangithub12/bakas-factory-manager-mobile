@@ -45,6 +45,17 @@ export async function loadPeople(): Promise<{ people: PersonOption[]; offline: b
   }
 }
 
+/** The lists saved by the last successful load, so the sign-in screen can open at once and refresh behind it. */
+export async function cachedSignIn(): Promise<{ roles: RoleCount[]; people: PersonOption[] } | null> {
+  try {
+    const roles = JSON.parse((await kvGet("roles")) ?? "null");
+    if (!Array.isArray(roles) || roles.length === 0) return null;
+    return { roles, people: JSON.parse((await kvGet("people")) ?? "[]") };
+  } catch {
+    return null;
+  }
+}
+
 /** Is this a new install with no Owner yet? Null when there is no signal to ask. */
 export async function loadStatus(): Promise<{ setup_needed: boolean; pin_length: number } | null> {
   try {

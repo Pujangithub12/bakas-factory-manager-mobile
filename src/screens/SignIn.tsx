@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Image, Linking, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text, Field, Btn, Card, Badge, Row, C, F, Icon, IconTile, PinPad } from "../ui";
-import { isKnownOnDevice, loadPeople, loadRoles, loadStatus, roleKnownOnDevice, useAuth, type PersonOption, type RoleCount } from "../auth";
+import { cachedSignIn, isKnownOnDevice, loadPeople, loadRoles, loadStatus, roleKnownOnDevice, useAuth, type PersonOption, type RoleCount } from "../auth";
 import { SIGN_IN_FOOTER, SIGN_IN_ROLES, roleInfo } from "../roles";
 import { api, ApiError } from "../api";
 
@@ -36,22 +36,34 @@ export default function SignIn() {
     }
   };
 
+  // Opens at once on the lists saved the last time, then refreshes them from the server behind the screen. Only a phone that
+  // has never loaded them waits for the server. The three calls run together, not one after another.
   const load = async () => {
-    setMode("loading");
+    const saved = await cachedSignIn();
     setMsg("");
+    if (saved) {
+      setRoles(saved.roles);
+      setPeople(saved.people);
+      setKnown(Object.fromEntries(await Promise.all(SIGN_IN_ROLES.map(async (role) => [role, await roleKnownOnDevice(role)] as const))));
+      setMode("pick");
+    } else {
+      setMode("loading");
+    }
     try {
-      const status = await loadStatus();
+      const [status, r, p] = await Promise.all([loadStatus(), loadRoles(), loadPeople().catch(() => null)]);
       if (status?.setup_needed) return setMode("setup");
-      const r = await loadRoles();
       setRoles(r.roles);
       setOffline(r.offline);
+      if (p) {
+        setPeople(p.people);
+        setKnownPeople(Object.fromEntries(await Promise.all(p.people.map(async (x) => [x.id, await isKnownOnDevice(x.id)] as const))));
+      }
       setKnown(Object.fromEntries(await Promise.all(SIGN_IN_ROLES.map(async (role) => [role, await roleKnownOnDevice(role)] as const))));
-      await refreshPeople();
       if (r.roles.length === 0 && r.offline) setMsg("No signal, and no one has signed in on this phone yet.");
-      setMode("pick");
+      setMode((m) => (m === "loading" ? "pick" : m));
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Could not reach the server");
-      setMode("pick");
+      if (!saved) setMsg(e instanceof Error ? e.message : "Could not reach the server");
+      setMode((m) => (m === "loading" ? "pick" : m));
     }
   };
   useEffect(() => { load(); }, []);
