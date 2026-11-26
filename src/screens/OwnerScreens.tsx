@@ -5,7 +5,7 @@ import { Avatar, Badge, Btn, C, Card, Empty, F, Icon, Row, Screen, ScreenHeader,
 import { useAuth } from "../auth";
 import { useData, type Data } from "../store";
 import { FilterBar, useFilter } from "./Overview";
-import { alertsFor, batchCode, kgToTons, machineStatus, mainRole, num, onSiteMap, personName, rolesOf, ticketNet, briquetteKg, pelletKg, yardUsedPct } from "../rules";
+import { alertsFor, attendanceAccess, batchCode, kgToTons, machineStatus, mainRole, num, onSiteMap, personName, rolesOf, ticketNet, briquetteKg, pelletKg, yardUsedPct } from "../rules";
 import { HOUR, DAY, fmtDateTime, fmtDuration, fmtTime, shiftWindow, type Row as R } from "../time";
 
 const ms = (v: any) => new Date(v).getTime();
@@ -266,7 +266,7 @@ const attIn = (D: Data, from: number, to: number) => D.attendance.filter((a) => 
 /** The owner's People tab. */
 export function OwnerPeople() {
   const nav = useNavigation<any>();
-  const { session } = useAuth();
+  const { session, roles: myRoles } = useAuth();
   const D = useData();
   const f = useFilter();
   const name = session!.person.full_name;
@@ -300,7 +300,7 @@ export function OwnerPeople() {
         <Card style={{ padding: 16, borderRadius: 18, gap: 8 }}>
           <Row><Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink, flex: 1 }}>Attendance</Text><Btn small kind="ghost" title="Everyone" onPress={() => nav.navigate("PeopleList", {})} /></Row>
           <Sub>From the gate register (security) and on-duty marks (supervisor).</Sub>
-          <Btn small kind="soft" title="Open attendance sheet" onPress={() => nav.navigate("Attendance")} />
+          {attendanceAccess(D, session!.person.id, myRoles) !== "none" ? <Btn small kind="soft" title="Open attendance sheet" onPress={() => nav.navigate("Attendance")} /> : null}
           <Row>{fig("On site now", site)}{fig("Came in", came.length)}{fig("New, to check", fresh, fresh > 0)}</Row>
           <Text style={{ fontFamily: F.head, fontSize: 20, color: C.ink, marginTop: 4 }}>By role</Text>
           {roles.length === 0 ? <Sub>Nobody came in during this period.</Sub> : roles.map(([r, n]) => (

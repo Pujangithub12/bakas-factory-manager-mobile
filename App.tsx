@@ -9,7 +9,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { initStore, useData } from "./src/store";
-import { machineAlerts } from "./src/rules";
+import { attendanceAccess, machineAlerts } from "./src/rules";
 import { shiftWindow } from "./src/time";
 import { loadSyncMemory } from "./src/sync";
 import { AuthProvider, useAuth } from "./src/auth";
@@ -51,7 +51,7 @@ const TAB_ICONS: Record<string, IconName> = {
  * Operators get their machine and log sheet; everyone else gets the screens for their roles.
  */
 function Tabs() {
-  const { activeRole } = useAuth();
+  const { activeRole, session, roles } = useAuth();
   const insets = useSafeAreaInsets();
   const D = useData();
   // A phone screen or tab the Owner or a Manager has switched off (Phone app on the laptop) does not appear.
@@ -65,8 +65,10 @@ function Tabs() {
   const floorBadge = mode === "Supervisor" ? D.machine.reduce((n, m) => n + machineAlerts(D, m).length, 0) : 0;
   return (
     // The key restarts the tab bar on the first tab of the new role when someone switches roles.
+    // Back returns to the tab you were on before, not straight to the first one.
     <Tab.Navigator
       key={mode}
+      backBehavior="history"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: C.green,
@@ -114,7 +116,7 @@ function Tabs() {
         <>
           <Tab.Screen name="CrewHome" component={Crew} options={{ title: "Crew", tabBarBadge: crewBadge || undefined }} />
           {on("supervisor.floor") ? <Tab.Screen name="FloorHome" component={Floor} options={{ title: "Floor", tabBarBadge: floorBadge || undefined }} /> : null}
-          <Tab.Screen name="AttendanceHome" component={Attendance} options={{ title: "Attendance" }} />
+          {session && attendanceAccess(D, session.person.id, roles) !== "none" ? <Tab.Screen name="AttendanceHome" component={Attendance} options={{ title: "Attendance" }} /> : null}
         </>
       ) : mode === "Driver" ? (
         <>

@@ -71,14 +71,34 @@ export type MarkStatus = (typeof MARK_STATUSES)[number];
 /** The weekly day off: Saturday. Someone who comes in anyway is Present. */
 export const WEEKLY_OFF = 6;
 
-/** How many days back this person may mark: the Owner any day, a Manager 7, a Supervisor the previous day. The server checks this too. */
+/** Setting the Owner keeps: who may see or mark the sheet. { person id: "none" | "view" | "edit" }. The server checks it too. */
+export const ATT_ACCESS_KEY = "attendance_access";
+export const ATT_LEVELS = ["none", "view", "edit"] as const;
+export type AttAccess = (typeof ATT_LEVELS)[number];
+export const ACCESS_LABEL: Record<AttAccess, string> = { none: "No access", view: "View only", edit: "View and mark" };
+
+/** The list as the Owner saved it. People not on it get their role's default. */
+export function accessList(D: Data): Record<string, AttAccess> {
+  const v = D.setting?.find((s) => s.key === ATT_ACCESS_KEY)?.value;
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, AttAccess>) : {};
+}
+/** Without an entry on the list: Owner, Manager and Supervisor mark; everyone else has no access. */
+export const defaultAccess = (roles: string[]): AttAccess => (roles.some((r) => r === "Owner" || r === "Manager" || r === "Supervisor") ? "edit" : "none");
+/** What this person may do with the sheet. The Owner always marks. */
+export function attendanceAccess(D: Data, personId: string, roles: string[]): AttAccess {
+  if (roles.includes("Owner")) return "edit";
+  const set = accessList(D)[personId];
+  return (ATT_LEVELS as readonly string[]).includes(set) ? set : defaultAccess(roles);
+}
+
+/** How many days back someone who may mark can go: the Owner any day, a Manager 7, anyone else today and yesterday. */
 export function markBackDays(roles: string[]) {
   if (roles.includes("Owner")) return Infinity;
   if (roles.includes("Manager")) return 7;
-  if (roles.includes("Supervisor")) return 1;
-  return -1;
+  return 1;
 }
-export function canMarkDay(roles: string[], day: string, today = dayKey()) {
+export function canMarkDay(access: AttAccess, roles: string[], day: string, today = dayKey()) {
+  if (access !== "edit") return false;
   const ago = Math.round((Date.parse(today) - Date.parse(day)) / DAY);
   return ago >= 0 && ago <= markBackDays(roles);
 }
@@ -108,8 +128,9 @@ export function attendanceIndex(D: Data): AttendanceIndex {
 }
 
 export type DayEntry = {
-  /** "Not in": today, and nothing recorded yet. null: nothing to show (a future day, or before this person started). */
-  status: MarkStatus | "Not in" | null;
+  /** "Not marked": nothing recorded, no gate entry and no mark. Nobody is made Absent unless someone marks it.
+   *  null: nothing to show (a future day, or before this person started). */
+  status: MarkStatus | "Not marked" | null;
   source: "mark" | "gate" | "auto";
   mark?: Row;
   /** First and last gate record of the day. */
@@ -119,7 +140,7 @@ export type DayEntry = {
   noCheckout: boolean;
 };
 
-/** One person on one day. A mark wins, then the gate, then Saturday is Off and any other finished day is Absent. */
+/** One person on one day. A mark wins, then the gate, then Saturday is Off; anything else is Not marked until someone marks it. */
 export function dayEntry(ix: AttendanceIndex, p: Row, day: string, now = Date.now()): DayEntry {
   const k = dayId(p.id, day);
   const mark = ix.marks.get(k);
@@ -135,7 +156,7 @@ export function dayEntry(ix: AttendanceIndex, p: Row, day: string, now = Date.no
   const start = joined && ix.first && joined > ix.first ? joined : ix.first;
   if (day > today || !p.active || !start || day < start) return { ...base, status: null, source: "auto" };
   if (weekdayOf(day) === WEEKLY_OFF) return { ...base, status: "Off", source: "auto" };
-  return { ...base, status: day === today ? "Not in" : "Absent", source: "auto" };
+  return { ...base, status: "Not marked", source: "auto" };
 }
 
 /** Who is on the sheet: everyone active but the Owner, plus anyone since made inactive who has a record on these days. */

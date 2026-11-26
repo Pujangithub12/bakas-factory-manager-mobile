@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Image, Linking, Pressable, ScrollView, View } from "react-native";
+import { BackHandler, Image, Linking, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Text, Field, Btn, Card, Badge, Row, C, F, Icon, IconTile, PinPad } from "../ui";
 import { cachedSignIn, isKnownOnDevice, loadPeople, loadRoles, loadStatus, roleKnownOnDevice, useAuth, type PersonOption, type RoleCount } from "../auth";
@@ -7,6 +7,22 @@ import { SIGN_IN_FOOTER, SIGN_IN_ROLES, roleInfo } from "../roles";
 import { api, ApiError } from "../api";
 
 const PIN_LENGTH = 6;
+
+/** The phone's Back button runs `onBack` while this screen shows. With nothing to go back to, pass null and Back leaves the app as usual.
+ *  (The sign-in steps are one page, not separate screens, so the system does not know about them.) */
+function useBack(onBack: (() => void) | null) {
+  const ref = React.useRef(onBack);
+  ref.current = onBack;
+  const active = !!onBack;
+  useEffect(() => {
+    if (!active) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      ref.current?.();
+      return true;
+    });
+    return () => sub.remove();
+  }, [active]);
+}
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** The token in a link like bakas://reset?token=... (the emailed reset page offers to open the app this way). */
 const resetTokenOf = (url?: string | null) => (url && /reset/.test(url) ? /[?&]token=([A-Za-z0-9_-]{43})(?:&|$)/.exec(url)?.[1] ?? null : null);
@@ -78,6 +94,14 @@ export default function SignIn() {
     const sub = Linking.addEventListener("url", (e) => open(e.url));
     return () => sub.remove();
   }, []);
+
+  // Back goes up one step: PIN to names, names to roles, Forgot PIN to roles. On the first page it leaves the app.
+  useBack(
+    mode === "pin" ? () => { setPerson(null); setMode("people"); }
+    : mode === "people" ? () => { setPick(null); setMode("pick"); }
+    : mode === "forgot" ? () => setMode("pick")
+    : null,
+  );
 
   const Brand = () => (
     <Row style={{ gap: 14, marginBottom: 8 }}>
@@ -218,6 +242,7 @@ function OwnerSetup({ onDone, brand }: { onDone: (name: string, pin: string, ema
   const [first, setFirst] = useState("");
   const [mismatch, setMismatch] = useState(false);
   const [email, setEmail] = useState("");
+  useBack(step === "name" ? null : () => { setFirst(""); setStep(step === "confirm" ? "pin" : "name"); });
 
   if (step === "name") {
     return (
@@ -309,6 +334,7 @@ function ForgotPin({ onBack }: { onBack: () => void }) {
 function ResetPin({ token, onBack, onDone }: { token: string; onBack: () => void; onDone: () => void }) {
   const [first, setFirst] = useState("");
   const [mismatch, setMismatch] = useState(false);
+  useBack(first ? () => setFirst("") : onBack);
   return (
     <PinScreen
       key={first ? "confirm" : "pin"}

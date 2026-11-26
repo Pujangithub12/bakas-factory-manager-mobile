@@ -7,7 +7,7 @@ import { clearRejected, pendingOps, rejectedList, useData, useOutboxCounts, type
 import { syncNow, useSyncState } from "../sync";
 import { fmtDateTime, fmtTime, shiftWindow } from "../time";
 import { getServerUrl } from "../api";
-import { canRun, hasRole, itemName, machineAlerts, num, onSiteMap, personName, PR_TONE, prText, toolsOut } from "../rules";
+import { attendanceAccess, canRun, hasRole, itemName, machineAlerts, num, onSiteMap, personName, PR_TONE, prText, toolsOut } from "../rules";
 import { roleInfo } from "../roles";
 
 type Tile = { title: string; sub: string; screen: string; icon: IconName; roles: string[] | "all"; badge?: () => { text: string; tone: "bad" | "warn" | "info" } | null };
@@ -131,6 +131,10 @@ export function Me() {
           <Text style={{ fontFamily: F.head, fontSize: 32, color: C.ink }}>{name}</Text>
           <Sub>{roles.map((r) => roleInfo(r).label).join(", ")}{mobile ? ` · ${mobile}` : ""}</Sub>
         </Card>
+        {/* Someone the Owner gave attendance access to, working as a role whose tabs do not include it. */}
+        {attendanceAccess(D, me, roles) !== "none" && !["Owner", "Manager", "Supervisor"].includes(activeRole) ? (
+          <Btn kind="soft" title="Attendance sheet" onPress={() => nav.navigate("Attendance")} />
+        ) : null}
         {modes.length > 1 ? (
           <Card>
             <Text style={{ fontFamily: F.head, fontSize: 24, color: C.ink }}>Working as</Text>
