@@ -4,6 +4,7 @@ import * as Crypto from "expo-crypto";
 import { api, OfflineError } from "./api";
 import { kvGet, kvSet, useData } from "./store";
 import { configureSync, startAutoSync, syncNow } from "./sync";
+import { locationSignedIn } from "./location";
 import { hasRole } from "./rules";
 import { HOUR } from "./time";
 import { SECURE, assertNotLocked, checkPin, hashPin, pinFailed, pinOk } from "./pinvault";
@@ -153,8 +154,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     configureSync(() => {
       const s = sessionRef.current;
-      return s ? { token: s.token, days: hasRole(rolesRef.current, "Owner", "Manager") ? 30 : 3 } : null;
+      return s ? { token: s.token, days: hasRole(rolesRef.current, "Owner", "Manager") ? 30 : 3, personId: s.person.id } : null;
     });
+    // The PIN is asked every time the app opens, so this is a sign-in: note where the phone is.
+    void locationSignedIn(session?.person.id ?? null);
     if (!session) return;
     return startAutoSync();
   }, [session?.person.id]);

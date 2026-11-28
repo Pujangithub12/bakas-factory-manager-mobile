@@ -1,6 +1,7 @@
 import NetInfo from "@react-native-community/netinfo";
 import { useSyncExternalStore } from "react";
 import { api, ApiError, OfflineError } from "./api";
+import { sendLocations } from "./location";
 import { applyPull, finishOps, kvGet, kvSet, pendingOps, setOnWrite, type Op } from "./store";
 import type { Row } from "./time";
 
@@ -21,7 +22,7 @@ const set = (patch: Partial<SyncState>) => { state = { ...state, ...patch }; sub
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 export const useSyncState = () => useSyncExternalStore(subscribe, () => state);
 
-type Provider = () => { token: string; days: number } | null;
+type Provider = () => { token: string; days: number; personId: string } | null;
 let provider: Provider = () => null;
 export const configureSync = (p: Provider) => { provider = p; };
 export const clearNeedsSignIn = () => set({ needsSignIn: false });
@@ -62,6 +63,8 @@ export async function syncNow(): Promise<void> {
       ops.forEach((o, i) => (res.results[i]?.ok ? done.push(o) : rejected.push({ op: o, error: res.results[i]?.error ?? "Rejected" })));
       await finishOps(done, rejected);
     }
+    // Where the phone was at its last few actions. A failure here never holds up the sync.
+    await sendLocations(session.token, session.personId).catch(() => {});
     const asked = Math.max(session.days, extraDays);
     const pull = await api<{ tables: Record<string, Row[]>; challan: SyncState["challan"] }>(`/sync/pull?days=${asked}`, { token: session.token });
     await applyPull(pull.tables);

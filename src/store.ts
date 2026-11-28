@@ -28,6 +28,9 @@ const inflight = new Map<string, number>();
 
 export const newId = () => Crypto.randomUUID();
 export const setOnWrite = (fn: () => void) => { onWrite = fn; };
+/** Told which tables were just saved (used to note where the phone was). */
+let onSave: ((tables: string[]) => void) | null = null;
+export const setOnSave = (fn: (tables: string[]) => void) => { onSave = fn; };
 
 const keyOf = (table: string, row: Row) => M[table].pk.map((c) => String(row[c])).join("|");
 
@@ -108,6 +111,7 @@ export async function save(...writes: Write[]): Promise<void> {
     }
   });
   onWrite?.();
+  try { onSave?.(writes.map((w) => w.table)); } catch { /* never stops a save */ }
 }
 
 // ---- outbox (used by sync) ----

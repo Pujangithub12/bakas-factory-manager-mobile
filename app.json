@@ -33,6 +33,13 @@
           "imageWidth": 200,
           "backgroundColor": "#FAFAF7"
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Bakas Factory Manager records where you are when you sign in or make an entry, such as a gate check-in. It is never tracked in the background.",
+          "isAndroidBackgroundLocationEnabled": false
+        }
       ]
     ],
     "extra": {
